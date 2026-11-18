@@ -194,18 +194,43 @@ class ErrorsAndRetriesTest {
     }
 
     @Test
-    void startingARunIsNotRepeatedAfterAServerError() {
+    void startingARunIsRepeatedAfterAServerErrorWithTheSameIdempotencyKey() {
         api.error(500, "internal", "x").reply(202, FakeApi.run("run_1", "queued", null));
-        assertThrows(ServerException.class, () -> api.client().scrapers().run("careers.company", INPUT));
-        assertEquals(1, api.count());
+        assertEquals("run_1", api.client().scrapers().run("careers.company", INPUT).id());
+        assertEquals(2, api.count());
+        String first = api.received().get(0).header("Idempotency-Key");
+        assertEquals(36, first.length());
+        assertEquals(first, api.received().get(1).header("Idempotency-Key"));
     }
 
     @Test
-    void startingARunIsNotRepeatedAfterATimeout() {
-        api.reply(new Reply(202, FakeApi.run("run_1", "queued", null)).delay(1500)).reply(202, FakeApi.run("run_2", "queued", null));
+    void startingARunIsRepeatedAfterATimeout() {
+        api.reply(new Reply(202, FakeApi.run("run_1", "queued", null)).delay(1500)).reply(202, FakeApi.run("run_1", "queued", null));
         EnrichedNowClient client = api.builder().timeout(Duration.ofMillis(200)).build();
-        ApiTimeoutException e = assertThrows(ApiTimeoutException.class, () -> client.scrapers().run("careers.company", INPUT));
-        assertTrue(e.getMessage().contains("check before sending it again"), e.getMessage());
+        assertEquals("run_1", client.scrapers().run("careers.company", INPUT).id());
+        assertEquals(2, api.count());
+    }
+
+    @Test
+    void eachCallHasItsOwnKeyUnlessOneIsGiven() {
+        api.reply(202, FakeApi.run("run_1", "queued", null)).reply(202, FakeApi.run("run_2", "queued", null))
+                .reply(202, FakeApi.run("run_3", "queued", null));
+        EnrichedNowClient client = api.client();
+        client.scrapers().run("careers.company", INPUT);
+        client.scrapers().run("careers.company", INPUT);
+        client.scrapers().run("careers.company", INPUT, RunOptions.builder().idempotencyKey("import-acme").build());
+        assertTrue(!api.received().get(0).header("Idempotency-Key").equals(api.received().get(1).header("Idempotency-Key")));
+        assertEquals("import-acme", api.received().get(2).header("Idempotency-Key"));
+        assertThrows(IllegalArgumentException.class, () -> RunOptions.builder().idempotencyKey("has space"));
+    }
+
+    @Test
+    void aKeyUsedForAnotherRequestIsRefusedAndNotRetried() {
+        api.reply(409, FakeApi.errorBody("idempotency_conflict", "Used.", "{\"run_id\":\"run_1\"}"));
+        ApiException e = assertThrows(ApiException.class, () -> api.client().scrapers().run("careers.company", INPUT,
+                RunOptions.builder().idempotencyKey("import-acme").build()));
+        assertEquals(409, e.statusCode());
+        assertEquals("idempotency_conflict", e.code());
         assertEquals(1, api.count());
     }
 

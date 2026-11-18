@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /** Every endpoint the SDK calls, described once; the blocking and the asynchronous services both send these. */
 final class Requests {
@@ -63,13 +64,14 @@ final class Requests {
 
     // --- runs ---------------------------------------------------------------------------------------------------------
 
-    /** Not idempotent: the API has no idempotency key, and a second POST starts a second run. */
+    /** Safe to repeat: it carries an idempotency key (the caller's, or one made here), so a second POST starts nothing. */
     ApiRequest<Run> startRun(String scraperId, Object input, RunOptions options) {
         Duration wait = options == null ? null : options.waitDuration();
         Query query = new Query().add("wait", wait == null ? null : seconds(wait));
         Map<String, Object> body = Collections.singletonMap("input", input == null ? Collections.emptyMap() : input);
+        String key = options == null || options.idempotencyKey() == null ? UUID.randomUUID().toString() : options.idempotencyKey();
         return ApiRequest.post("/v1/scrapers/" + segment(scraperId, "scraperId") + "/runs", query, body, false,
-                wait == null ? null : wait.plus(WAIT_MARGIN), Run.class);
+                wait == null ? null : wait.plus(WAIT_MARGIN), Run.class).withIdempotencyKey(key);
     }
 
     static String seconds(Duration duration) {

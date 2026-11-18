@@ -143,6 +143,9 @@ final class Transport {
                 .header("Authorization", "Bearer " + apiKey)
                 .header("User-Agent", userAgent)
                 .header("Accept", "application/json");
+        if (request.idempotencyKey != null) {
+            builder.header("Idempotency-Key", request.idempotencyKey);
+        }
         if (request.body != null) {
             byte[] body;
             try {
@@ -227,8 +230,8 @@ final class Transport {
      * How long to wait before trying again, or null when this failure is not retried.
      *
      * <p>Retried: a 429 (the API refused before doing anything) and a connection that was never made, for every
-     * request; a 5xx and a failure in flight only for a request that is safe to repeat. Starting a run is not: the API
-     * has no idempotency key, so a second POST could start, and charge for, a second run.
+     * request; a 5xx and a failure in flight only for a request that is safe to repeat. Starting a run is: it
+     * carries an idempotency key, so a second POST gets the run the first one started.
      */
     Duration retryDelay(ApiRequest<?> request, int attempt, EnrichedNowException failure) {
         if (attempt >= maxRetries) {

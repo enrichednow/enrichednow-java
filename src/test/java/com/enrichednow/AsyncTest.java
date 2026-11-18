@@ -95,14 +95,15 @@ class AsyncTest {
     }
 
     @Test
-    void asyncReadsAreRetriedAndAsyncStartsAreNot() throws Exception {
+    void asyncReadsAndAsyncStartsAreRetried() throws Exception {
         api.error(500, "internal", "x").error(500, "internal", "x").ok(FakeApi.run("run_1", "ok", null));
         assertEquals("run_1", get(api.client().async().runs().get("run_1")).id());
         assertEquals(3, api.count());
 
-        api.error(500, "internal", "x");
-        assertInstanceOf(ServerException.class, failure(api.client().async().scrapers().run("careers.company", INPUT)));
-        assertEquals(4, api.count());
+        api.error(500, "internal", "x").reply(202, FakeApi.run("run_2", "queued", null));
+        assertEquals("run_2", get(api.client().async().scrapers().run("careers.company", INPUT)).id());
+        assertEquals(5, api.count());                          // sent again, under the same idempotency key
+        assertEquals(api.received().get(3).header("Idempotency-Key"), api.received().get(4).header("Idempotency-Key"));
     }
 
     @Test

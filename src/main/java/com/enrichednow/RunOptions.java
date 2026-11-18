@@ -4,13 +4,15 @@ import java.time.Duration;
 
 /** How to start a run. */
 public final class RunOptions {
-    private static final RunOptions NONE = new RunOptions(null);
+    private static final RunOptions NONE = new RunOptions(null, null);
     static final Duration MAX_WAIT = Duration.ofSeconds(60);
 
     private final Duration wait;
+    private final String idempotencyKey;
 
-    private RunOptions(Duration wait) {
+    private RunOptions(Duration wait, String idempotencyKey) {
         this.wait = wait;
+        this.idempotencyKey = idempotencyKey;
     }
 
     /** @return the defaults: the call returns as soon as the run is queued */
@@ -39,9 +41,15 @@ public final class RunOptions {
         return wait;
     }
 
+    /** @return the caller's idempotency key, or {@code null} when the library makes one for the call */
+    public String idempotencyKey() {
+        return idempotencyKey;
+    }
+
     /** Builds {@link RunOptions}. */
     public static final class Builder {
         private Duration wait;
+        private String idempotencyKey;
 
         private Builder() {
         }
@@ -58,9 +66,26 @@ public final class RunOptions {
             return this;
         }
 
+        /**
+         * Names this call so that it can be repeated without starting a second run: for 24 hours the same key with
+         * the same request gives the run the first call started, and with a different request is refused (409
+         * {@code idempotency_conflict}). Without one, the library makes a key for each call, which is what makes its
+         * retries safe.
+         *
+         * @param idempotencyKey any text of yours, up to 255 characters, no spaces
+         * @return this builder
+         */
+        public Builder idempotencyKey(String idempotencyKey) {
+            if (idempotencyKey != null && !idempotencyKey.matches("[\\x21-\\x7e]{1,255}")) {
+                throw new IllegalArgumentException("idempotencyKey must be 1 to 255 visible ASCII characters, without spaces");
+            }
+            this.idempotencyKey = idempotencyKey;
+            return this;
+        }
+
         /** @return the options */
         public RunOptions build() {
-            return new RunOptions(wait);
+            return new RunOptions(wait, idempotencyKey);
         }
     }
 }

@@ -56,9 +56,9 @@ public final class ScraperService {
      * {@link RunService#waitFor(String)} picks it up. Either way, read the run's status: a run that could not read its
      * target is still a successful call.
      *
-     * <p>Starting a run is not idempotent, so this call is not repeated after a failure in flight or a server error:
-     * when it throws a {@link com.enrichednow.errors.ConnectionException} or a
-     * {@link com.enrichednow.errors.ServerException}, look at {@link RunService#list()} before starting the run again.
+     * <p>The request carries an {@code Idempotency-Key}, so it is safe to send again: after a failure in flight or a
+     * server error it is retried with the same key, and the API answers with the run the first attempt started, never
+     * a second one. {@link RunOptions.Builder#idempotencyKey(String)} makes a call of yours repeatable across processes.
      *
      * @param scraperId the scraper's id
      * @param input     the scraper's input

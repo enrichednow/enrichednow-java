@@ -23,6 +23,25 @@ final class ApiRequest<T> {
     /** The least time the request must be allowed, when it is longer than the client's timeout; or null. */
     final Duration minTimeout;
     final Decoder<T> decoder;
+    /** Sent as the {@code Idempotency-Key} header, or null: what makes starting a run safe to send again. */
+    final String idempotencyKey;
+
+    /** The same request, carrying this idempotency key: with it, the request is safe to repeat. */
+    ApiRequest<T> withIdempotencyKey(String key) {
+        return new ApiRequest<>(method, path, query, body, true, minTimeout, decoder, key);
+    }
+
+    private ApiRequest(String method, String path, String query, Object body, boolean idempotent, Duration minTimeout,
+                       Decoder<T> decoder, String idempotencyKey) {
+        this.method = method;
+        this.path = path;
+        this.query = query;
+        this.body = body;
+        this.idempotent = idempotent;
+        this.minTimeout = minTimeout;
+        this.decoder = decoder;
+        this.idempotencyKey = idempotencyKey;
+    }
 
     private ApiRequest(String method, String path, Query query, Object body, boolean idempotent, Duration minTimeout,
                        Decoder<T> decoder) {
@@ -33,6 +52,7 @@ final class ApiRequest<T> {
         this.idempotent = idempotent;
         this.minTimeout = minTimeout;
         this.decoder = decoder;
+        this.idempotencyKey = null;
     }
 
     static <T> ApiRequest<T> get(String path, Query query, Decoder<T> decoder) {

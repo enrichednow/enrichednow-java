@@ -17,20 +17,20 @@ Maven:
 <dependency>
   <groupId>com.enrichednow</groupId>
   <artifactId>enrichednow-java</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
 </dependency>
 ```
 
 Gradle (Kotlin DSL):
 
 ```kotlin
-implementation("com.enrichednow:enrichednow-java:0.1.0")
+implementation("com.enrichednow:enrichednow-java:0.1.1")
 ```
 
 Gradle (Groovy DSL):
 
 ```groovy
-implementation 'com.enrichednow:enrichednow-java:0.1.0'
+implementation 'com.enrichednow:enrichednow-java:0.1.1'
 ```
 
 ## Quickstart
@@ -334,13 +334,21 @@ A request that fails is tried again up to `maxRetries` times (default 2), with e
 | --- | --- | --- |
 | The connection could not be made | Retried | Retried: nothing was sent |
 | `429` | Retried, after `Retry-After` when the answer has one (at most 60 s) | Retried: no run was created |
-| `5xx` | Retried | **Not retried** |
-| Timeout, or a connection that broke | Retried | **Not retried** |
+| `5xx` | Retried | Retried, with the same idempotency key |
+| Timeout, or a connection that broke | Retried | Retried, with the same idempotency key |
 | `401`, `402`, `403`, `404`, `422` | Not retried: the same request gets the same answer | Not retried |
 
-Starting a run is not idempotent: a second `POST` starts, and may charge for, a second run. So when starting a run
-fails with a `ConnectionException` or a `ServerException`, the run may or may not exist. Look at
-`client.runs().list()` before starting it again.
+Starting a run is safe to repeat: the request carries an `Idempotency-Key`, a new one for each call, so a retry gets
+the run the first attempt started and never a second one. To make a call of your own repeatable (a job that may be
+restarted, say), give it your own key:
+
+```java
+Run run = client.scrapers().run("ats.board", input,
+        RunOptions.builder().idempotencyKey("import-2026-11-19-acme").build());
+```
+
+For 24 hours the same key with the same request gives the same run. The same key with a different request is refused:
+an `ApiException` with status 409 and code `idempotency_conflict`.
 
 ## Async
 
