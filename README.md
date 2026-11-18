@@ -33,9 +33,6 @@ Gradle (Groovy DSL):
 implementation 'com.enrichednow:enrichednow-java:0.1.0'
 ```
 
-> **Not on Maven Central yet.** Until the first release is there, clone this repository, run `./mvnw install`, and
-> depend on the same coordinates from your local Maven repository.
-
 ## Quickstart
 
 Create an API key in the console, under **API keys**, and keep it out of your code:
