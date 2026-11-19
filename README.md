@@ -17,20 +17,20 @@ Maven:
 <dependency>
   <groupId>com.enrichednow</groupId>
   <artifactId>enrichednow-java</artifactId>
-  <version>0.1.1</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
 Gradle (Kotlin DSL):
 
 ```kotlin
-implementation("com.enrichednow:enrichednow-java:0.1.1")
+implementation("com.enrichednow:enrichednow-java:0.2.0")
 ```
 
 Gradle (Groovy DSL):
 
 ```groovy
-implementation 'com.enrichednow:enrichednow-java:0.1.1'
+implementation 'com.enrichednow:enrichednow-java:0.2.0'
 ```
 
 ## Quickstart
@@ -188,6 +188,23 @@ client.runs().records(run.id(), JsonNode.class);
 Records are kept for **7 days** after the run ended. Fetch them and store what you need. After that the list is
 empty and `RecordPage.expired()` is `true`.
 
+#### CSV and NDJSON, written by the API
+
+```java
+try (OutputStream out = Files.newOutputStream(Path.of("jobs.csv"))) {
+    client.runs().exportAll(run.id(), RecordFormat.CSV, out);   // every page; the header row once
+}
+RecordsExport page = client.runs().exportPage(run.id(), RecordFormat.NDJSON, 500, null);  // text(), nextCursor(), expired()
+byte[] png = client.runs().file(run.id(), "screenshot.png");   // a file the run made
+```
+
+The CSV has a column for each field of the scraper's record schema, in its order; a nested object becomes
+`parent.child` columns, a list one cell of JSON, and a cell a spreadsheet would run as a formula starts with an
+apostrophe.
+
+`client.runs().get(id, Duration.ofSeconds(120))` holds the request until the run ends, up to 300 seconds, as
+`RunOptions.waitUpTo` does on starting one. `RunListParams` also takes `apiKeyId`, `from` and `to`.
+
 ## Pagination
 
 Every list returns a `PagedIterable`: iterate it and the next page is fetched when the current one runs out.
@@ -240,6 +257,38 @@ for (Usage.Row row : byScraper.rows()) {
     System.out.println(row.key() + ": " + row.units() + " units in " + row.runs() + " runs");
 }
 ```
+
+`usage.unmetered()` is `true` for an account with no unit limit. Every answer about runs carries the account's
+units and runs in progress in its headers: `client.standing()` is the last one seen, and `client.usage().standing()`
+asks for it (`unitsRemaining()`, `unitsTopup()`, `unitsReset()`, `runsRemaining()`, `unitsAvailable()`).
+
+## Webhooks
+
+```java
+WebhookEndpoint made = client.webhooks().create("https://example.com/hooks/enrichednow",
+        List.of("run.succeeded", "run.failed"), "production");
+String secret = made.secret();                                  // shown this once: keep it
+
+client.webhooks().list();
+client.webhooks().update(made.id(), WebhookChange.builder().enabled(false).build());
+client.webhooks().rotateSecret(made.id());
+client.webhooks().delete(made.id());
+String runSecret = client.webhooks().createRunSecret();          // for RunOptions.builder().webhookUrl(...)
+for (WebhookDelivery d : client.webhooks().deliveries(WebhookDeliveryListParams.builder().status("failed").build())) { ... }
+client.webhooks().resend(deliveryId);
+```
+
+A request that arrives is checked before it is acted on: give the body exactly as it arrived.
+
+```java
+byte[] body = request.getInputStream().readAllBytes();
+WebhookEvent event = Webhooks.parse(secret, request.getHeader(Webhooks.TIMESTAMP_HEADER), body,
+        request.getHeader(Webhooks.SIGNATURE_HEADER));             // WebhookVerificationException: answer 400
+System.out.println(event.id() + " " + event.type() + " " + event.run().id());
+```
+
+`Webhooks.verify` only checks. Both compare in constant time and refuse a timestamp more than 5 minutes from now.
+`event.id()` is the same on every attempt: use it to ignore a repeat.
 
 ## Datasets
 

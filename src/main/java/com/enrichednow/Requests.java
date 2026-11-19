@@ -10,7 +10,12 @@ import com.enrichednow.models.PostingDetail;
 import com.enrichednow.models.Run;
 import com.enrichednow.models.Scraper;
 import com.enrichednow.models.ScraperDetail;
+import com.enrichednow.models.RecordFormat;
+import com.enrichednow.models.RecordsExport;
 import com.enrichednow.models.Usage;
+import com.enrichednow.models.WebhookDelivery;
+import com.enrichednow.models.WebhookEndpoint;
+import com.enrichednow.models.WebhookEndpointList;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -68,7 +73,11 @@ final class Requests {
     ApiRequest<Run> startRun(String scraperId, Object input, RunOptions options) {
         Duration wait = options == null ? null : options.waitDuration();
         Query query = new Query().add("wait", wait == null ? null : seconds(wait));
-        Map<String, Object> body = Collections.singletonMap("input", input == null ? Collections.emptyMap() : input);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("input", input == null ? Collections.emptyMap() : input);
+        if (options != null && options.webhookUrl() != null) {
+            body.put("webhook_url", options.webhookUrl());
+        }
         String key = options == null || options.idempotencyKey() == null ? UUID.randomUUID().toString() : options.idempotencyKey();
         return ApiRequest.post("/v1/scrapers/" + segment(scraperId, "scraperId") + "/runs", query, body, false,
                 wait == null ? null : wait.plus(WAIT_MARGIN), Run.class).withIdempotencyKey(key);
@@ -82,6 +91,100 @@ final class Requests {
         return ApiRequest.get("/v1/runs/" + segment(runId, "runId"), null, Run.class);
     }
 
+    ApiRequest<Run> run(String runId, Duration wait) {
+        RunOptions.checkWait(wait);
+        if (wait == null || wait.isZero()) {
+            return run(runId);
+        }
+        return ApiRequest.get("/v1/runs/" + segment(runId, "runId"), new Query().add("wait", seconds(wait)), wait.plus(WAIT_MARGIN), Run.class);
+    }
+
+    ApiRequest<RecordsExport> export(String runId, RecordFormat format, Integer limit, String cursor) {
+        if (format == null) {
+            throw new IllegalArgumentException("format must not be null");
+        }
+        Query query = new Query().add("format", format.value()).add("limit", limit).add("cursor", cursor);
+        return ApiRequest.raw("/v1/runs/" + segment(runId, "runId") + "/records", query, format.mediaType(),
+                (body, headers) -> new RecordsExport(format, body, headers.firstValue("x-next-cursor").orElse(null),
+                        "true".equals(headers.firstValue("x-records-expired").orElse(null))));
+    }
+
+    ApiRequest<byte[]> file(String runId, String name) {
+        return ApiRequest.raw("/v1/runs/" + segment(runId, "runId") + "/files/" + segment(name, "name"), null, "*/*", (body, headers) -> body);
+    }
+
+    /** The smallest call whose answer carries the account's standing. */
+    ApiRequest<Void> standing() {
+        return ApiRequest.raw("/v1/runs", new Query().add("limit", 1), "application/json", (body, headers) -> null);
+    }
+
+    // --- webhooks -----------------------------------------------------------------------------------------------------
+
+    ApiRequest<WebhookEndpointList> webhookEndpoints() {
+        JavaType endpoint = type(WebhookEndpoint.class);
+        return ApiRequest.get("/v1/webhooks", null, (mapper, body) -> {
+            JsonNode root = mapper.readTree(body);
+            return new WebhookEndpointList(Requests.<WebhookEndpoint>items(mapper, root, "endpoints", endpoint), root.path("run_secret_set").asBoolean(false));
+        });
+    }
+
+    /** Not sent again after a failure that may have reached the API: one call never makes two endpoints. */
+    ApiRequest<WebhookEndpoint> createWebhook(String url, List<String> events, String description) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("url", url);
+        body.put("events", events);
+        if (description != null) {
+            body.put("description", description);
+        }
+        return ApiRequest.of("POST", "/v1/webhooks", body, false, (mapper, bytes) -> mapper.readValue(bytes, WebhookEndpoint.class));
+    }
+
+    ApiRequest<WebhookEndpoint> webhook(String endpointId) {
+        return ApiRequest.get("/v1/webhooks/" + segment(endpointId, "endpointId"), null, WebhookEndpoint.class);
+    }
+
+    ApiRequest<WebhookEndpoint> updateWebhook(String endpointId, WebhookChange change) {
+        if (change == null || change.body().isEmpty()) {
+            throw new IllegalArgumentException("give at least one of url, events, description, enabled");
+        }
+        return ApiRequest.of("PATCH", "/v1/webhooks/" + segment(endpointId, "endpointId"), change.body(), true,
+                (mapper, bytes) -> mapper.readValue(bytes, WebhookEndpoint.class));
+    }
+
+    ApiRequest<Void> deleteWebhook(String endpointId) {
+        return ApiRequest.of("DELETE", "/v1/webhooks/" + segment(endpointId, "endpointId"), null, true, (mapper, bytes) -> null);
+    }
+
+    ApiRequest<WebhookEndpoint> rotateWebhookSecret(String endpointId) {
+        return ApiRequest.of("POST", "/v1/webhooks/" + segment(endpointId, "endpointId") + "/rotate-secret", null, false,
+                (mapper, bytes) -> mapper.readValue(bytes, WebhookEndpoint.class));
+    }
+
+    ApiRequest<String> createRunSecret() {
+        return ApiRequest.of("POST", "/v1/webhooks/run-secret", null, false, (mapper, bytes) -> mapper.readTree(bytes).path("secret").asText(null));
+    }
+
+    ApiRequest<Page<WebhookDelivery>> deliveries(WebhookDeliveryListParams given, String cursor) {
+        WebhookDeliveryListParams params = given == null ? WebhookDeliveryListParams.none() : given;
+        Query query = new Query()
+                .add("limit", params.limit)
+                .add("cursor", cursor != null ? cursor : params.cursor)
+                .add("endpoint_id", params.endpointId)
+                .add("run_id", params.runId)
+                .add("status", params.status);
+        JavaType delivery = type(WebhookDelivery.class);
+        return ApiRequest.get("/v1/webhooks/deliveries", query, (mapper, body) -> {
+            JsonNode root = mapper.readTree(body);
+            return new Page<>(Requests.<WebhookDelivery>items(mapper, root, "deliveries", delivery), cursorOf(root), transport,
+                    next -> deliveries(params, next));
+        });
+    }
+
+    ApiRequest<WebhookDelivery> resendDelivery(String deliveryId) {
+        return ApiRequest.of("POST", "/v1/webhooks/deliveries/" + segment(deliveryId, "deliveryId") + "/resend", null, false,
+                (mapper, bytes) -> mapper.readValue(bytes, WebhookDelivery.class));
+    }
+
     /** Idempotent: a run that has ended is returned unchanged. */
     ApiRequest<Run> cancelRun(String runId) {
         return ApiRequest.post("/v1/runs/" + segment(runId, "runId") + "/cancel", null, null, true, null, Run.class);
@@ -93,7 +196,10 @@ final class Requests {
                 .add("limit", params.limit)
                 .add("cursor", cursor != null ? cursor : params.cursor)
                 .add("scraper_id", params.scraperId)
-                .add("status", params.status == null ? null : params.status.value());
+                .add("status", params.status == null ? null : params.status.value())
+                .add("api_key_id", params.apiKeyId)
+                .add("from", params.from)
+                .add("to", params.to);
         JavaType run = type(Run.class);
         return ApiRequest.get("/v1/runs", query, (mapper, body) -> {
             JsonNode root = mapper.readTree(body);

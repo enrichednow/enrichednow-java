@@ -60,7 +60,7 @@ class ClientTest {
         assertEquals("/v1/health", request.path);
         assertNull(request.query);
         assertEquals("Bearer " + FakeApi.KEY, request.header("Authorization"));
-        assertEquals("enrichednow-java/0.1.1", request.header("User-Agent"));
+        assertEquals("enrichednow-java/0.2.0", request.header("User-Agent"));
         assertEquals("application/json", request.header("Accept"));
     }
 

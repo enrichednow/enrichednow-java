@@ -5,6 +5,7 @@ import com.enrichednow.errors.ApiTimeoutException;
 import com.enrichednow.errors.ConnectionException;
 import com.enrichednow.errors.EnrichedNowException;
 import com.enrichednow.errors.RateLimitException;
+import com.enrichednow.models.Standing;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -42,6 +43,8 @@ final class Transport {
     private final Duration initialRetryDelay;
     private final Duration maxRetryDelay;
     private final String userAgent;
+    /** The account's standing as the last answer that carried it said. */
+    private volatile Standing standing;
 
     Transport(HttpClient http, String baseUrl, String apiKey, Duration timeout, int maxRetries, Duration initialRetryDelay,
               Duration maxRetryDelay) {
@@ -54,6 +57,10 @@ final class Transport {
         this.maxRetryDelay = maxRetryDelay;
         this.userAgent = "enrichednow-java/" + Version.VALUE;
         this.mapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
+
+    Standing standing() {
+        return standing;
     }
 
     // --- blocking -----------------------------------------------------------------------------------------------------
@@ -142,7 +149,7 @@ final class Transport {
                 .timeout(allowed)
                 .header("Authorization", "Bearer " + apiKey)
                 .header("User-Agent", userAgent)
-                .header("Accept", "application/json");
+                .header("Accept", request.accept != null ? request.accept : "application/json");
         if (request.idempotencyKey != null) {
             builder.header("Idempotency-Key", request.idempotencyKey);
         }
@@ -161,9 +168,19 @@ final class Transport {
     }
 
     private <T> T handle(ApiRequest<T> request, HttpResponse<byte[]> response) {
+        Standing carried = Standing.fromHeaders(response.headers().map());
+        if (carried != null) {
+            standing = carried;
+        }
         int status = response.statusCode();
         if (status >= 200 && status < 300) {
             try {
+                if (request.reader != null) {
+                    return request.reader.read(response.body(), response.headers());
+                }
+                if (response.body().length == 0) {
+                    return null;
+                }
                 return request.decoder.decode(mapper, response.body());
             } catch (IOException | IllegalArgumentException e) {
                 throw new EnrichedNowException("The answer of " + request.method + " " + request.path + " could not be read: "

@@ -2,6 +2,7 @@ package com.enrichednow;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.net.http.HttpHeaders;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -12,6 +13,32 @@ final class ApiRequest<T> {
     @FunctionalInterface
     interface Decoder<T> {
         T decode(ObjectMapper mapper, byte[] body) throws IOException;
+    }
+
+    /** Turns a successful answer that is not JSON into the value the caller asked for: it reads the headers too. */
+    @FunctionalInterface
+    interface Reader<T> {
+        T read(byte[] body, HttpHeaders headers) throws IOException;
+    }
+
+    /** The {@code Accept} header; null: JSON. */
+    String accept;
+    /** When set, reads the answer instead of {@link #decoder}. */
+    Reader<T> reader;
+
+    static <T> ApiRequest<T> raw(String path, Query query, String accept, Reader<T> reader) {
+        ApiRequest<T> request = new ApiRequest<>("GET", path, query, null, true, null, (mapper, body) -> null);
+        request.accept = accept;
+        request.reader = reader;
+        return request;
+    }
+
+    static <T> ApiRequest<T> of(String method, String path, Object body, boolean idempotent, Decoder<T> decoder) {
+        return new ApiRequest<>(method, path, (Query) null, body, idempotent, null, decoder);
+    }
+
+    static <T> ApiRequest<T> get(String path, Query query, Duration minTimeout, Class<T> type) {
+        return new ApiRequest<>("GET", path, query, null, true, minTimeout, (mapper, body) -> mapper.readValue(body, type));
     }
 
     final String method;

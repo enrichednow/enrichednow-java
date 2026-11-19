@@ -5,10 +5,16 @@ import com.enrichednow.models.Company;
 import com.enrichednow.models.Health;
 import com.enrichednow.models.Posting;
 import com.enrichednow.models.PostingDetail;
+import com.enrichednow.models.RecordFormat;
+import com.enrichednow.models.RecordsExport;
 import com.enrichednow.models.Run;
 import com.enrichednow.models.Scraper;
 import com.enrichednow.models.ScraperDetail;
+import com.enrichednow.models.Standing;
 import com.enrichednow.models.Usage;
+import com.enrichednow.models.WebhookDelivery;
+import com.enrichednow.models.WebhookEndpoint;
+import com.enrichednow.models.WebhookEndpointList;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +42,7 @@ public final class EnrichedNowAsyncClient {
     private final Runs runs = new Runs();
     private final UsageReports usage = new UsageReports();
     private final Data data = new Data();
+    private final WebhookCalls webhooks = new WebhookCalls();
 
     EnrichedNowAsyncClient(Transport transport, Requests requests, RunService blockingRuns) {
         this.transport = transport;
@@ -65,6 +72,99 @@ public final class EnrichedNowAsyncClient {
     /** @return Datasets: job postings and companies */
     public Data data() {
         return data;
+    }
+
+    /** @return webhooks: the endpoints, their secrets and the delivery log */
+    public WebhookCalls webhooks() {
+        return webhooks;
+    }
+
+    /** Webhooks, asynchronously. */
+    public final class WebhookCalls {
+        private WebhookCalls() {
+        }
+
+        /**
+         * @return the account's endpoints, later
+         * @see WebhookService#list()
+         */
+        public CompletableFuture<WebhookEndpointList> list() {
+            return transport.executeAsync(requests.webhookEndpoints());
+        }
+
+        /**
+         * @param url         the https URL
+         * @param events      the events it is told about
+         * @param description your note on it, or null
+         * @return the endpoint with its secret, later
+         * @see WebhookService#create(String, List, String)
+         */
+        public CompletableFuture<WebhookEndpoint> create(String url, List<String> events, String description) {
+            return transport.executeAsync(requests.createWebhook(url, events, description));
+        }
+
+        /**
+         * @param endpointId the endpoint's id
+         * @return the endpoint, later
+         * @see WebhookService#get(String)
+         */
+        public CompletableFuture<WebhookEndpoint> get(String endpointId) {
+            return transport.executeAsync(requests.webhook(endpointId));
+        }
+
+        /**
+         * @param endpointId the endpoint's id
+         * @param change     what to change
+         * @return the endpoint as it is now, later
+         * @see WebhookService#update(String, WebhookChange)
+         */
+        public CompletableFuture<WebhookEndpoint> update(String endpointId, WebhookChange change) {
+            return transport.executeAsync(requests.updateWebhook(endpointId, change));
+        }
+
+        /**
+         * @param endpointId the endpoint's id
+         * @return done, later
+         * @see WebhookService#delete(String)
+         */
+        public CompletableFuture<Void> delete(String endpointId) {
+            return transport.executeAsync(requests.deleteWebhook(endpointId));
+        }
+
+        /**
+         * @param endpointId the endpoint's id
+         * @return the endpoint with its new secret, later
+         * @see WebhookService#rotateSecret(String)
+         */
+        public CompletableFuture<WebhookEndpoint> rotateSecret(String endpointId) {
+            return transport.executeAsync(requests.rotateWebhookSecret(endpointId));
+        }
+
+        /**
+         * @return the run secret, later
+         * @see WebhookService#createRunSecret()
+         */
+        public CompletableFuture<String> createRunSecret() {
+            return transport.executeAsync(requests.createRunSecret());
+        }
+
+        /**
+         * @param params the filter, the page size and the cursor
+         * @return one page of the delivery log, later
+         * @see WebhookService#deliveriesPage(WebhookDeliveryListParams)
+         */
+        public CompletableFuture<Page<WebhookDelivery>> deliveriesPage(WebhookDeliveryListParams params) {
+            return transport.executeAsync(requests.deliveries(params, null));
+        }
+
+        /**
+         * @param deliveryId the delivery's id
+         * @return the new delivery, later
+         * @see WebhookService#resend(String)
+         */
+        public CompletableFuture<WebhookDelivery> resend(String deliveryId) {
+            return transport.executeAsync(requests.resendDelivery(deliveryId));
+        }
     }
 
     /**
@@ -180,6 +280,38 @@ public final class EnrichedNowAsyncClient {
         }
 
         /**
+         * @param runId the run's id
+         * @param wait  from 0 to 300 seconds
+         * @return the run when it has ended or the wait is over, later
+         * @see RunService#get(String, Duration)
+         */
+        public CompletableFuture<Run> get(String runId, Duration wait) {
+            return transport.executeAsync(requests.run(runId, wait));
+        }
+
+        /**
+         * @param runId  the run's id
+         * @param format CSV or NDJSON
+         * @param limit  records a page, or null
+         * @param cursor the cursor of the page before, or null
+         * @return one page of records as the API wrote it, later
+         * @see RunService#exportPage(String, RecordFormat, Integer, String)
+         */
+        public CompletableFuture<RecordsExport> exportPage(String runId, RecordFormat format, Integer limit, String cursor) {
+            return transport.executeAsync(requests.export(runId, format, limit, cursor));
+        }
+
+        /**
+         * @param runId the run's id
+         * @param name  the file's name
+         * @return the file's bytes, later
+         * @see RunService#file(String, String)
+         */
+        public CompletableFuture<byte[]> file(String runId, String name) {
+            return transport.executeAsync(requests.file(runId, name));
+        }
+
+        /**
          * @param params the filter, the page size and, to continue an earlier list, the cursor
          * @return one page of the account's runs, later
          * @see RunService#listPage(RunListParams)
@@ -262,6 +394,14 @@ public final class EnrichedNowAsyncClient {
          */
         public CompletableFuture<Usage> get(UsageParams params) {
             return transport.executeAsync(requests.usage(params));
+        }
+
+        /**
+         * @return where the account stands now, later
+         * @see UsageService#standing()
+         */
+        public CompletableFuture<Standing> standing() {
+            return transport.executeAsync(requests.standing()).thenApply(ignored -> transport.standing());
         }
     }
 

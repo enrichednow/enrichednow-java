@@ -1,8 +1,14 @@
 package com.enrichednow;
 
 import com.enrichednow.errors.RunTimeoutException;
+import com.enrichednow.errors.EnrichedNowException;
+import com.enrichednow.models.RecordFormat;
+import com.enrichednow.models.RecordsExport;
 import com.enrichednow.models.Run;
 import com.fasterxml.jackson.databind.JavaType;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Map;
 
@@ -25,6 +31,89 @@ public final class RunService {
      */
     public Run get(String runId) {
         return transport.execute(requests.run(runId));
+    }
+
+    /**
+     * One run, when it has ended or once {@code wait} has passed: {@code GET /v1/runs/{id}?wait=}. The API holds the
+     * request open in the meantime, so one call does what a few polls would.
+     *
+     * @param runId the run's id
+     * @param wait  from 0 to 300 seconds
+     * @return the run
+     */
+    public Run get(String runId, Duration wait) {
+        return transport.execute(requests.run(runId, wait));
+    }
+
+    /**
+     * One page of a run's records written by the API, as CSV or NDJSON: {@code GET /v1/runs/{id}/records?format=}.
+     *
+     * <p>The CSV has a column for each field of the scraper's record schema (a nested object becomes
+     * {@code parent.child} columns, a list one cell of JSON, a cell a spreadsheet would run as a formula starts with an
+     * apostrophe), and every page begins with the header row. {@link RecordsExport#nextCursor()} continues;
+     * {@link #exportAll} follows it for you.
+     *
+     * @param runId  the run's id
+     * @param format CSV or NDJSON
+     * @param limit  records a page, 1 to 1000; null for the API's 100
+     * @param cursor the {@code nextCursor} of the page before, or null
+     * @return the page
+     */
+    public RecordsExport exportPage(String runId, RecordFormat format, Integer limit, String cursor) {
+        return transport.execute(requests.export(runId, format, limit, cursor));
+    }
+
+    /**
+     * Writes every record of a run to {@code out}, as CSV or NDJSON, 1000 a page: the result is one file (a CSV has
+     * its header row once). The stream is not closed.
+     *
+     * @param runId  the run's id
+     * @param format CSV or NDJSON
+     * @param out    where to write
+     * @throws EnrichedNowException when the records are gone (kept 7 days after a run ends)
+     */
+    public void exportAll(String runId, RecordFormat format, OutputStream out) {
+        String cursor = null;
+        boolean first = true;
+        try {
+            while (true) {
+                RecordsExport page = exportPage(runId, format, 1000, cursor);
+                if (page.expired()) {
+                    throw new EnrichedNowException("The records of run " + runId + " have expired: they are kept 7 days after a run ends.");
+                }
+                byte[] body = page.body();
+                int start = 0;
+                if (!first && format == RecordFormat.CSV) {
+                    start = body.length;
+                    for (int i = 0; i < body.length; i++) {
+                        if (body[i] == '\n') {
+                            start = i + 1;
+                            break;
+                        }
+                    }
+                }
+                out.write(body, start, body.length - start);
+                first = false;
+                if (page.nextCursor() == null) {
+                    return;
+                }
+                cursor = page.nextCursor();
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * A file the run produced (a screenshot, say), read with this client's key: {@code GET /v1/runs/{id}/files/{name}}.
+     * A record also carries the file's own address, which works without a key for an hour.
+     *
+     * @param runId the run's id
+     * @param name  the file's name, e.g. {@code screenshot.png}
+     * @return the file's bytes
+     */
+    public byte[] file(String runId, String name) {
+        return transport.execute(requests.file(runId, name));
     }
 
     /**

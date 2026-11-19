@@ -90,7 +90,7 @@ class RunsTest {
         api.reply(202, FakeApi.run("run_1", "running", null));
         api.client().scrapers().run("ats.board", INPUT, RunOptions.waitUpTo(Duration.ofMillis(500)));
         assertEquals("wait=0.5", api.only().query);
-        assertThrows(IllegalArgumentException.class, () -> RunOptions.waitUpTo(Duration.ofSeconds(61)));
+        assertThrows(IllegalArgumentException.class, () -> RunOptions.waitUpTo(Duration.ofSeconds(301)));
     }
 
     @Test

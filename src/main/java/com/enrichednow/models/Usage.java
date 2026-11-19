@@ -11,16 +11,26 @@ public final class Usage {
     private final long totalUnits;
     private final long allowanceUnits;
     private final List<Row> rows;
+    private final boolean unmetered;
 
     @JsonCreator
     Usage(@JsonProperty("period") Period period,
           @JsonProperty("total_units") long totalUnits,
           @JsonProperty("allowance_units") long allowanceUnits,
-          @JsonProperty("rows") List<Row> rows) {
+          @JsonProperty("rows") List<Row> rows,
+          @JsonProperty("unmetered") boolean unmetered) {
         this.period = period;
         this.totalUnits = totalUnits;
         this.allowanceUnits = allowanceUnits;
         this.rows = Values.list(rows);
+        this.unmetered = unmetered;
+    }
+
+    /**
+     * @return true for an account with no unit limit (the service's own): nothing it does is refused for units
+     */
+    public boolean unmetered() {
+        return unmetered;
     }
 
     /** @return the days the report covers */

@@ -43,6 +43,7 @@ public final class EnrichedNowClient {
     private final RunService runs;
     private final UsageService usage;
     private final DataService data;
+    private final WebhookService webhooks;
     private final EnrichedNowAsyncClient async;
 
     private EnrichedNowClient(Builder builder) {
@@ -60,6 +61,7 @@ public final class EnrichedNowClient {
         this.runs = new RunService(transport, requests);
         this.usage = new UsageService(transport, requests);
         this.data = new DataService(transport, requests);
+        this.webhooks = new WebhookService(transport, requests);
         this.async = new EnrichedNowAsyncClient(transport, requests, runs);
     }
 
@@ -96,6 +98,21 @@ public final class EnrichedNowClient {
     /** @return Datasets: job postings and companies */
     public DataService data() {
         return data;
+    }
+
+    /** @return webhooks: the endpoints told when a run ends, their signing secrets, and the delivery log */
+    public WebhookService webhooks() {
+        return webhooks;
+    }
+
+    /**
+     * Where the account stood at the last answer that said so: every answer about runs carries the account's units
+     * and runs in progress in its headers. Empty until such an answer has come; {@code usage().standing()} asks.
+     *
+     * @return the standing last seen
+     */
+    public java.util.Optional<com.enrichednow.models.Standing> standing() {
+        return java.util.Optional.ofNullable(transport.standing());
     }
 
     /** @return the same calls, each returning a {@link java.util.concurrent.CompletableFuture} instead of blocking */
@@ -152,7 +169,7 @@ public final class EnrichedNowClient {
     }
 
     static Duration firstWait(ScrapeOptions options) {
-        return options.timeout().compareTo(RunOptions.MAX_WAIT) < 0 ? options.timeout() : RunOptions.MAX_WAIT;
+        return options.timeout().compareTo(RunOptions.SCRAPE_WAIT) < 0 ? options.timeout() : RunOptions.SCRAPE_WAIT;
     }
 
     static ScrapeResult result(Run run, ScrapeOptions options, RunService runs) {
