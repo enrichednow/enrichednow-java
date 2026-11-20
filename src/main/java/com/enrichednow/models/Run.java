@@ -19,6 +19,8 @@ public final class Run {
     private final Map<String, Object> input;
     private final long recordCount;
     private final long units;
+    private final Integer unitsPerRequest;
+    private final Integer unitsPerRecord;
     private final Diagnostics diagnostics;
     private final Instant createdAt;
     private final Instant startedAt;
@@ -33,6 +35,8 @@ public final class Run {
         @JsonProperty("input") Map<String, Object> input,
         @JsonProperty("record_count") long recordCount,
         @JsonProperty("units") long units,
+        @JsonProperty("units_per_request") Integer unitsPerRequest,
+        @JsonProperty("units_per_record") Integer unitsPerRecord,
         @JsonProperty("diagnostics") Diagnostics diagnostics,
         @JsonProperty("created_at") String createdAt,
         @JsonProperty("started_at") String startedAt,
@@ -46,6 +50,8 @@ public final class Run {
         this.input = Values.map(input);
         this.recordCount = recordCount;
         this.units = units;
+        this.unitsPerRequest = unitsPerRequest;
+        this.unitsPerRecord = unitsPerRecord;
         this.diagnostics = diagnostics;
         this.createdAt = Values.instant(createdAt);
         this.startedAt = Values.instant(startedAt);
@@ -98,6 +104,16 @@ public final class Run {
     /** @return the units charged: 0 until the run ends {@code ok} or {@code partial} */
     public long units() {
         return units;
+    }
+
+    /** @return the run's rate, fixed when it started, for a scraper billed per request; null otherwise */
+    public Integer unitsPerRequest() {
+        return unitsPerRequest;
+    }
+
+    /** @return the run's rate, fixed when it started, for a scraper billed per record (units a record); null otherwise */
+    public Integer unitsPerRecord() {
+        return unitsPerRecord;
     }
 
     /** @return what the run did; {@code null} until it ends, and for a run that ended before reporting anything */

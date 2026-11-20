@@ -2,6 +2,7 @@ package com.enrichednow;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -220,6 +221,11 @@ class ParityTest {
         assertEquals("evt_1", event.id());
         assertEquals("run.succeeded", event.type());
         assertEquals("run_1", event.run().id());
+        assertNull(event.run().unitsPerRequest());                // an event from before costs differed
+        String rated = body.replace("\"units\":1,", "\"units\":1,\"units_per_request\":null,\"units_per_record\":3,");
+        WebhookEvent ratedEvent = Webhooks.parse(secret, now, rated.getBytes(StandardCharsets.UTF_8), sign(secret, now, rated));
+        assertEquals(3, ratedEvent.run().unitsPerRecord());
+        assertNull(ratedEvent.run().unitsPerRequest());
         String old = String.valueOf(Instant.now().getEpochSecond() - 301);
         assertFalse(Webhooks.verify("whsec_other", now, bytes, sign(secret, now, body)));
         assertFalse(Webhooks.verify(secret, now, (body + " ").getBytes(StandardCharsets.UTF_8), sign(secret, now, body)));

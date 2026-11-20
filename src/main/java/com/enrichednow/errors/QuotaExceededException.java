@@ -29,4 +29,17 @@ public class QuotaExceededException extends ApiException {
     public Long allowanceUnits() {
         return detailNumber("allowance_units");
     }
+
+    /** @return when starting a run was refused, the top-up units left ({@code 0}: spent too); otherwise {@code null} */
+    public Long topupUnits() {
+        return detailNumber("topup_units");
+    }
+
+    /**
+     * @return when starting a run was refused, the least the run would have cost: its scraper's units a request, or a
+     *     record for one record; otherwise {@code null}
+     */
+    public Long unitsNeeded() {
+        return detailNumber("units_needed");
+    }
 }

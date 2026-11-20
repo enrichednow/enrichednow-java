@@ -65,6 +65,15 @@ class ErrorsAndRetriesTest {
     }
 
     @Test
+    void quotaExceededSaysWhatTheRunNeeded() {
+        api.reply(402, FakeApi.errorBody("quota_exceeded", "This month's units are used up.",
+                "{\"used_units\":998,\"allowance_units\":1000,\"topup_units\":0,\"units_needed\":5}"));
+        QuotaExceededException e = assertThrows(QuotaExceededException.class, () -> api.client().scrapers().run("careers.company", INPUT));
+        assertEquals(5L, e.unitsNeeded());
+        assertEquals(0L, e.topupUnits());
+    }
+
+    @Test
     void forbiddenIsAPermissionDeniedExceptionWithItsReason() {
         api.reply(403, FakeApi.errorBody("forbidden", "Confirm your email address first.", "{\"reason\":\"email_not_verified\"}"));
         PermissionDeniedException e = assertThrows(PermissionDeniedException.class, () -> api.client().data().postings().list().toList());

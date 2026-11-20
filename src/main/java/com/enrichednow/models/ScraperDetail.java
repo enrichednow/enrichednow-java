@@ -16,11 +16,13 @@ public final class ScraperDetail extends Scraper {
                   @JsonProperty("summary") String summary,
                   @JsonProperty("mode") String mode,
                   @JsonProperty("billing_unit") String billingUnit,
+                  @JsonProperty("units_per_request") Integer unitsPerRequest,
+                  @JsonProperty("units_per_record") Integer unitsPerRecord,
                   @JsonProperty("data_class") String dataClass,
                   @JsonProperty("availability") String availability,
                   @JsonProperty("input_schema") Map<String, Object> inputSchema,
                   @JsonProperty("record_schema") Map<String, Object> recordSchema) {
-        super(id, version, title, summary, mode, billingUnit, dataClass, availability);
+        super(id, version, title, summary, mode, billingUnit, unitsPerRequest, unitsPerRecord, dataClass, availability);
         this.inputSchema = Values.map(inputSchema);
         this.recordSchema = Values.map(recordSchema);
     }

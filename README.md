@@ -17,20 +17,20 @@ Maven:
 <dependency>
   <groupId>com.enrichednow</groupId>
   <artifactId>enrichednow-java</artifactId>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
 </dependency>
 ```
 
 Gradle (Kotlin DSL):
 
 ```kotlin
-implementation("com.enrichednow:enrichednow-java:0.2.0")
+implementation("com.enrichednow:enrichednow-java:0.3.0")
 ```
 
 Gradle (Groovy DSL):
 
 ```groovy
-implementation 'com.enrichednow:enrichednow-java:0.2.0'
+implementation 'com.enrichednow:enrichednow-java:0.3.0'
 ```
 
 ## Quickstart
@@ -90,6 +90,7 @@ ScraperDetail board = client.scrapers().get("ats.board");       // GET /v1/scrap
 board.inputSchema();                                            // JSON Schema of the input, as a Map
 board.recordSchema();                                           // JSON Schema of one record
 board.billingUnit();                                            // "request" or "record"
+board.unitCost();                                               // units a run, or a record, by the billing unit
 ```
 
 ### Start a run

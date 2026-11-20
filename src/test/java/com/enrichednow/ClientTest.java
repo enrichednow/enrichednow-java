@@ -60,7 +60,7 @@ class ClientTest {
         assertEquals("/v1/health", request.path);
         assertNull(request.query);
         assertEquals("Bearer " + FakeApi.KEY, request.header("Authorization"));
-        assertEquals("enrichednow-java/0.2.0", request.header("User-Agent"));
+        assertEquals("enrichednow-java/0.3.0", request.header("User-Agent"));
         assertEquals("application/json", request.header("Accept"));
     }
 
@@ -86,7 +86,7 @@ class ClientTest {
         api.ok("{\"scrapers\":[{\"id\":\"ats.board\",\"version\":3,\"title\":\"ATS board\",\"summary\":\"Reads a board.\",\"mode\":\"job\","
                 + "\"billing_unit\":\"request\",\"data_class\":\"jobs\",\"availability\":\"public\",\"later\":true},"
                 + "{\"id\":\"linkedin.jobs_search\",\"version\":1,\"title\":\"LinkedIn\",\"summary\":\"s\",\"mode\":\"job\","
-                + "\"billing_unit\":\"record\",\"data_class\":\"jobs\",\"availability\":\"public\"}]}");
+                + "\"billing_unit\":\"record\",\"units_per_request\":null,\"units_per_record\":4,\"data_class\":\"jobs\",\"availability\":\"public\"}]}");
         List<Scraper> scrapers = api.client().scrapers().list();
         assertEquals("GET /v1/scrapers", api.only().toString());
         assertEquals(2, scrapers.size());
@@ -95,6 +95,9 @@ class ClientTest {
         assertEquals("request", scrapers.get(0).billingUnit());
         assertEquals("record", scrapers.get(1).billingUnit());
         assertEquals("public", scrapers.get(1).availability());
+        assertEquals(4, scrapers.get(1).unitsPerRecord());
+        assertEquals(4, scrapers.get(1).unitCost());
+        assertEquals(1, scrapers.get(0).unitCost());              // an API from before costs differed: 1
     }
 
     @Test

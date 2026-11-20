@@ -108,7 +108,8 @@ public class ApiException extends EnrichedNowException {
 
     /**
      * What the API added to the error. Empty for most codes; {@code fields} for {@code invalid_input},
-     * {@code used_units} and {@code allowance_units} for {@code quota_exceeded}, {@code active_runs} and
+     * {@code used_units} and {@code allowance_units} for {@code quota_exceeded} (with {@code topup_units} and
+     * {@code units_needed} on starting a run), {@code active_runs} and
      * {@code max_concurrent_runs} for {@code too_many_runs}, and {@code reason} for some {@code forbidden} answers.
      *
      * @return the details, never {@code null}

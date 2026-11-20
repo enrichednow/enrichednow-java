@@ -11,6 +11,8 @@ public class Scraper {
     private final String summary;
     private final String mode;
     private final String billingUnit;
+    private final Integer unitsPerRequest;
+    private final Integer unitsPerRecord;
     private final String dataClass;
     private final String availability;
 
@@ -21,6 +23,8 @@ public class Scraper {
             @JsonProperty("summary") String summary,
             @JsonProperty("mode") String mode,
             @JsonProperty("billing_unit") String billingUnit,
+            @JsonProperty("units_per_request") Integer unitsPerRequest,
+            @JsonProperty("units_per_record") Integer unitsPerRecord,
             @JsonProperty("data_class") String dataClass,
             @JsonProperty("availability") String availability) {
         this.id = id;
@@ -29,6 +33,8 @@ public class Scraper {
         this.summary = summary;
         this.mode = mode;
         this.billingUnit = billingUnit;
+        this.unitsPerRequest = unitsPerRequest;
+        this.unitsPerRecord = unitsPerRecord;
         this.dataClass = dataClass;
         this.availability = availability;
     }
@@ -58,9 +64,28 @@ public class Scraper {
         return mode;
     }
 
-    /** @return what a charged run costs: {@code request} (1 unit) or {@code record} (1 unit a record) */
+    /** @return how a charged run is counted: by the {@code request} (the run) or by the {@code record} */
     public String billingUnit() {
         return billingUnit;
+    }
+
+    /**
+     * @return for a scraper billed per request, the units a run that ends {@code ok} or {@code partial} costs;
+     *     null for one billed per record
+     */
+    public Integer unitsPerRequest() {
+        return unitsPerRequest;
+    }
+
+    /** @return for a scraper billed per record, the units each record of a charged run costs; null otherwise */
+    public Integer unitsPerRecord() {
+        return unitsPerRecord;
+    }
+
+    /** @return what the scraper costs, a run or a record by its billing unit: 1 when the API did not say */
+    public int unitCost() {
+        Integer cost = "record".equals(billingUnit) ? unitsPerRecord : unitsPerRequest;
+        return cost == null ? 1 : cost;
     }
 
     /** @return the class of data the scraper returns */
