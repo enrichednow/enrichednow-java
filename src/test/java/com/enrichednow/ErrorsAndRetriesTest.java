@@ -16,6 +16,7 @@ import com.enrichednow.errors.ConnectionException;
 import com.enrichednow.errors.EnrichedNowException;
 import com.enrichednow.errors.NotFoundException;
 import com.enrichednow.errors.PermissionDeniedException;
+import com.enrichednow.errors.LimitReachedException;
 import com.enrichednow.errors.QuotaExceededException;
 import com.enrichednow.errors.RateLimitException;
 import com.enrichednow.errors.ServerException;
@@ -71,6 +72,28 @@ class ErrorsAndRetriesTest {
         QuotaExceededException e = assertThrows(QuotaExceededException.class, () -> api.client().scrapers().run("careers.company", INPUT));
         assertEquals(5L, e.unitsNeeded());
         assertEquals(0L, e.topupUnits());
+    }
+
+    @Test
+    void limitReachedIsItsOwnExceptionAndStillAQuotaExceededException() {
+        api.reply(402, FakeApi.errorBody("limit_reached", "This API key's monthly limit of 100 units is reached.",
+                "{\"scope\":\"key\",\"key_id\":\"key_1\",\"limit_units\":100,\"used_units\":100,\"units_needed\":1}"));
+        QuotaExceededException caught = assertThrows(QuotaExceededException.class, () -> api.client().scrapers().run("careers.company", INPUT));
+        LimitReachedException e = assertInstanceOf(LimitReachedException.class, caught);
+        assertEquals("limit_reached", e.code());
+        assertEquals("key", e.scope());
+        assertEquals("key_1", e.keyId());
+        assertEquals(100L, e.limitUnits());
+        assertEquals(100L, e.usedUnits());
+        assertEquals(1L, e.unitsNeeded());
+        assertEquals(1, api.count());
+    }
+
+    @Test
+    void quotaExceededIsNotALimitReached() {
+        api.reply(402, FakeApi.errorBody("quota_exceeded", "Used up.", "{}"));
+        QuotaExceededException e = assertThrows(QuotaExceededException.class, () -> api.client().scrapers().run("careers.company", INPUT));
+        assertFalse(e instanceof LimitReachedException);
     }
 
     @Test

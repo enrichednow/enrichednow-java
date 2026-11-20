@@ -17,20 +17,20 @@ Maven:
 <dependency>
   <groupId>com.enrichednow</groupId>
   <artifactId>enrichednow-java</artifactId>
-  <version>0.3.0</version>
+  <version>0.3.1</version>
 </dependency>
 ```
 
 Gradle (Kotlin DSL):
 
 ```kotlin
-implementation("com.enrichednow:enrichednow-java:0.3.0")
+implementation("com.enrichednow:enrichednow-java:0.3.1")
 ```
 
 Gradle (Groovy DSL):
 
 ```groovy
-implementation 'com.enrichednow:enrichednow-java:0.3.0'
+implementation 'com.enrichednow:enrichednow-java:0.3.1'
 ```
 
 ## Quickstart
@@ -345,6 +345,7 @@ Everything the SDK throws is unchecked and extends `EnrichedNowException`.
 | `ApiException` | The API answered with an error. The base of the next seven. |
 | `AuthenticationException` | `401 unauthorized`: the key is missing, mistyped or revoked. |
 | `QuotaExceededException` | `402 quota_exceeded`: this month's allowance is used up. `usedUnits()`, `allowanceUnits()`. |
+| `LimitReachedException` | `402 limit_reached`: a spend limit of the account's own, or of the key. `scope()` (`account` or `key`), `keyId()`, `limitUnits()`, `usedUnits()`, `unitsNeeded()`. Extends `QuotaExceededException`. |
 | `PermissionDeniedException` | `403 forbidden`: for example, the account does not have Datasets. |
 | `NotFoundException` | `404 not_found`: no such scraper, run, posting or company. |
 | `ValidationException` | `422 invalid_input`: the request does not fit. `fieldErrors()` lists every problem. |

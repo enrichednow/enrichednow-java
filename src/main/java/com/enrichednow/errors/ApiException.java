@@ -15,7 +15,8 @@ import java.util.Map;
  * {@code not_found}, {@code invalid_input}, {@code quota_exceeded}, {@code too_many_runs}, {@code rate_limited},
  * {@code internal}, {@code data_unavailable}). The message is a sentence for a person and its wording can change.
  *
- * <p>Each HTTP status has a subclass: {@link AuthenticationException} (401), {@link QuotaExceededException} (402),
+ * <p>Each HTTP status has a subclass: {@link AuthenticationException} (401), {@link QuotaExceededException} (402; its subclass
+ * {@link LimitReachedException} for {@code limit_reached}),
  * {@link PermissionDeniedException} (403), {@link NotFoundException} (404), {@link ValidationException} (422),
  * {@link RateLimitException} (429) and {@link ServerException} (5xx).
  */
@@ -61,7 +62,9 @@ public class ApiException extends EnrichedNowException {
             case 401:
                 return new AuthenticationException(statusCode, code, apiMessage, details, requestId);
             case 402:
-                return new QuotaExceededException(statusCode, code, apiMessage, details, requestId);
+                return "limit_reached".equals(code)
+                        ? new LimitReachedException(statusCode, code, apiMessage, details, requestId)
+                        : new QuotaExceededException(statusCode, code, apiMessage, details, requestId);
             case 403:
                 return new PermissionDeniedException(statusCode, code, apiMessage, details, requestId);
             case 404:
