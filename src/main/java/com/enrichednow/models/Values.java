@@ -44,8 +44,14 @@ final class Values {
         return items == null ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(items));
     }
 
-    static Map<String, Object> map(Map<String, Object> items) {
+    static <V> Map<String, V> map(Map<String, V> items) {
         return items == null ? Collections.emptyMap() : Collections.unmodifiableMap(new LinkedHashMap<>(items));
+    }
+
+    /** A text value of a JSON object read as a map, or null when it is missing or not text. */
+    static String text(Map<String, Object> values, String key) {
+        Object value = values == null ? null : values.get(key);
+        return value instanceof String ? (String) value : null;
     }
 
     static List<Instant> instants(List<String> items) {

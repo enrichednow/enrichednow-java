@@ -3,9 +3,11 @@ package com.enrichednow.errors;
 import java.util.Map;
 
 /**
- * {@code 402 limit_reached}: the run would go past a spend limit the account set itself: its monthly limit
- * ({@link #scope()} {@code "account"}) or the API key's ({@code "key"}, with {@link #keyId()}). Units may be left on
- * the plan: raising the limit, in the console, is what helps. No run was created. It is a
+ * {@code 402 limit_reached}: the run would go past a spend limit set on the account, not the plan's allowance:
+ * {@link #scope()} says whose. {@code "account"}: the account's own monthly limit. {@code "key"}: the API key's, with
+ * {@link #keyId()}. {@code "saved_formula"}: a saved formula's monthly unit cap, with {@link #savedFormulaId()} (raise
+ * it with {@code SavedFormulaChange}, or wait for next month). {@code "formula_run"}: a formula run met a price that
+ * changed while it ran. Units may be left on the plan: raising the limit is what helps. No run was created. It is a
  * {@link QuotaExceededException}, so code that catches that one catches this too.
  */
 public class LimitReachedException extends QuotaExceededException {
@@ -22,16 +24,22 @@ public class LimitReachedException extends QuotaExceededException {
         super(statusCode, code, apiMessage, details, requestId);
     }
 
-    /** @return {@code "account"} or {@code "key"}: whose limit was reached; {@code null} when the answer did not say */
+    /**
+     * @return whose limit was reached: {@code "account"}, {@code "key"}, {@code "saved_formula"} or
+     *     {@code "formula_run"}; {@code null} when the answer did not say
+     */
     public String scope() {
-        Object value = details().get("scope");
-        return value instanceof String ? (String) value : null;
+        return detailText("scope");
     }
 
     /** @return the API key whose limit was reached, when {@link #scope()} is {@code "key"}; otherwise {@code null} */
     public String keyId() {
-        Object value = details().get("key_id");
-        return value instanceof String ? (String) value : null;
+        return detailText("key_id");
+    }
+
+    /** @return the saved formula whose monthly cap was reached, when {@link #scope()} is {@code "saved_formula"}; otherwise {@code null} */
+    public String savedFormulaId() {
+        return detailText("saved_formula_id");
     }
 
     /** @return the limit, in units a calendar month, or {@code null} when the answer did not say */

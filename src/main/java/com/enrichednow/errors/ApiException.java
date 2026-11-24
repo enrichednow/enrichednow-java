@@ -12,13 +12,17 @@ import java.util.Map;
  * {@code {"error": {"code", "message", "details"}}}.
  *
  * <p>Match on {@link #code()}, a stable {@code snake_case} code ({@code unauthorized}, {@code forbidden},
- * {@code not_found}, {@code invalid_input}, {@code quota_exceeded}, {@code too_many_runs}, {@code rate_limited},
- * {@code internal}, {@code data_unavailable}). The message is a sentence for a person and its wording can change.
+ * {@code not_found}, {@code invalid_input}, {@code quota_exceeded}, {@code limit_reached}, {@code too_many_runs},
+ * {@code rate_limited}, {@code idempotency_conflict}, {@code internal}, {@code data_unavailable}, and for formulas
+ * {@code formula_not_found}, {@code formula_unavailable}, {@code requirement_missing}, {@code attestation_required},
+ * {@code saved_formula_archived}, {@code plan_limit_reached}, {@code unit_cap_too_low}). The message is a sentence for
+ * a person and its wording can change.
  *
  * <p>Each HTTP status has a subclass: {@link AuthenticationException} (401), {@link QuotaExceededException} (402; its subclass
  * {@link LimitReachedException} for {@code limit_reached}),
- * {@link PermissionDeniedException} (403), {@link NotFoundException} (404), {@link ValidationException} (422),
- * {@link RateLimitException} (429) and {@link ServerException} (5xx).
+ * {@link PermissionDeniedException} (403; its subclass {@link PlanLimitReachedException} for {@code plan_limit_reached}),
+ * {@link NotFoundException} (404), {@link ConflictException} (409; a subclass for each formula code),
+ * {@link ValidationException} (422), {@link RateLimitException} (429) and {@link ServerException} (5xx).
  */
 public class ApiException extends EnrichedNowException {
     private static final long serialVersionUID = 1L;
@@ -66,9 +70,13 @@ public class ApiException extends EnrichedNowException {
                         ? new LimitReachedException(statusCode, code, apiMessage, details, requestId)
                         : new QuotaExceededException(statusCode, code, apiMessage, details, requestId);
             case 403:
-                return new PermissionDeniedException(statusCode, code, apiMessage, details, requestId);
+                return "plan_limit_reached".equals(code)
+                        ? new PlanLimitReachedException(statusCode, code, apiMessage, details, requestId)
+                        : new PermissionDeniedException(statusCode, code, apiMessage, details, requestId);
             case 404:
                 return new NotFoundException(statusCode, code, apiMessage, details, requestId);
+            case 409:
+                return conflict(statusCode, code, apiMessage, details, requestId);
             case 400:
             case 422:
                 return new ValidationException(statusCode, code, apiMessage, details, requestId);
@@ -80,6 +88,23 @@ public class ApiException extends EnrichedNowException {
                 }
                 return new ApiException(statusCode, code, apiMessage, details, requestId);
         }
+    }
+
+    private static ConflictException conflict(int statusCode, String code, String apiMessage, Map<String, Object> details,
+                                              String requestId) {
+        if ("attestation_required".equals(code)) {
+            return new AttestationRequiredException(statusCode, code, apiMessage, details, requestId);
+        }
+        if ("formula_unavailable".equals(code)) {
+            return new FormulaUnavailableException(statusCode, code, apiMessage, details, requestId);
+        }
+        if ("requirement_missing".equals(code)) {
+            return new RequirementMissingException(statusCode, code, apiMessage, details, requestId);
+        }
+        if ("saved_formula_archived".equals(code)) {
+            return new SavedFormulaArchivedException(statusCode, code, apiMessage, details, requestId);
+        }
+        return new ConflictException(statusCode, code, apiMessage, details, requestId);
     }
 
     private static String describe(int statusCode, String code, String apiMessage, String requestId) {
@@ -113,7 +138,8 @@ public class ApiException extends EnrichedNowException {
      * What the API added to the error. Empty for most codes; {@code fields} for {@code invalid_input},
      * {@code used_units} and {@code allowance_units} for {@code quota_exceeded} (with {@code topup_units} and
      * {@code units_needed} on starting a run), {@code active_runs} and
-     * {@code max_concurrent_runs} for {@code too_many_runs}, and {@code reason} for some {@code forbidden} answers.
+     * {@code max_concurrent_runs} for {@code too_many_runs}, and {@code reason} for some {@code forbidden} answers. The
+     * subclasses of the formula codes read theirs with getters of their own.
      *
      * @return the details, never {@code null}
      */
@@ -161,6 +187,11 @@ public class ApiException extends EnrichedNowException {
     Long detailNumber(String key) {
         Object value = details().get(key);
         return value instanceof Number ? ((Number) value).longValue() : null;
+    }
+
+    String detailText(String key) {
+        Object value = details().get(key);
+        return value instanceof String ? (String) value : null;
     }
 
     /** One problem of an {@code invalid_input} error. */

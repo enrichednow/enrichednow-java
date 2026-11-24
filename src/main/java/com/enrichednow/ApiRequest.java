@@ -25,6 +25,10 @@ final class ApiRequest<T> {
     String accept;
     /** When set, reads the answer instead of {@link #decoder}. */
     Reader<T> reader;
+    /** When set, the body sent as it is instead of {@link #body} as JSON, with {@link #contentType}. */
+    byte[] rawBody;
+    /** The {@code Content-Type} of {@link #rawBody}. */
+    String contentType;
 
     static <T> ApiRequest<T> raw(String path, Query query, String accept, Reader<T> reader) {
         ApiRequest<T> request = new ApiRequest<>("GET", path, query, null, true, null, (mapper, body) -> null);
@@ -35,6 +39,24 @@ final class ApiRequest<T> {
 
     static <T> ApiRequest<T> of(String method, String path, Object body, boolean idempotent, Decoder<T> decoder) {
         return new ApiRequest<>(method, path, (Query) null, body, idempotent, null, decoder);
+    }
+
+    /** Any method, with a query and a JSON body (or none). */
+    static <T> ApiRequest<T> send(String method, String path, Query query, Object body, boolean idempotent, Duration minTimeout,
+                                  Class<T> type) {
+        return new ApiRequest<>(method, path, query, body, idempotent, minTimeout, (mapper, bytes) -> mapper.readValue(bytes, type));
+    }
+
+    /** Any method, with a query and a JSON body (or none), its answer read by {@code decoder}. */
+    static <T> ApiRequest<T> send(String method, String path, Query query, Object body, boolean idempotent, Decoder<T> decoder) {
+        return new ApiRequest<>(method, path, query, body, idempotent, null, decoder);
+    }
+
+    /** The same request, sending {@code body} as it is with this {@code Content-Type} instead of a JSON body. */
+    ApiRequest<T> withRawBody(byte[] body, String type) {
+        this.rawBody = body;
+        this.contentType = type;
+        return this;
     }
 
     static <T> ApiRequest<T> get(String path, Query query, Duration minTimeout, Class<T> type) {
@@ -55,7 +77,12 @@ final class ApiRequest<T> {
 
     /** The same request, carrying this idempotency key: with it, the request is safe to repeat. */
     ApiRequest<T> withIdempotencyKey(String key) {
-        return new ApiRequest<>(method, path, query, body, true, minTimeout, decoder, key);
+        ApiRequest<T> keyed = new ApiRequest<>(method, path, query, body, true, minTimeout, decoder, key);
+        keyed.accept = accept;
+        keyed.reader = reader;
+        keyed.rawBody = rawBody;
+        keyed.contentType = contentType;
+        return keyed;
     }
 
     private ApiRequest(String method, String path, String query, Object body, boolean idempotent, Duration minTimeout,

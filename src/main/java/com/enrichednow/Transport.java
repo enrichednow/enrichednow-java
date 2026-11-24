@@ -153,7 +153,10 @@ final class Transport {
         if (request.idempotencyKey != null) {
             builder.header("Idempotency-Key", request.idempotencyKey);
         }
-        if (request.body != null) {
+        if (request.rawBody != null) {
+            builder.header("Content-Type", request.contentType)
+                    .method(request.method, HttpRequest.BodyPublishers.ofByteArray(request.rawBody));
+        } else if (request.body != null) {
             byte[] body;
             try {
                 body = mapper.writeValueAsBytes(request.body);

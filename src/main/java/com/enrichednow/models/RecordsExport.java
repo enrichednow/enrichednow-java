@@ -2,7 +2,7 @@ package com.enrichednow.models;
 
 import java.nio.charset.StandardCharsets;
 
-/** One page of a run's records as the API wrote it, as CSV or NDJSON. */
+/** One page of a run's records, or of a formula's rows, as the API wrote it, as CSV or NDJSON. */
 public final class RecordsExport {
     private final RecordFormat format;
     private final byte[] body;
@@ -42,7 +42,7 @@ public final class RecordsExport {
         return nextCursor;
     }
 
-    /** @return true when the records are gone: they are kept 7 days after a run ends */
+    /** @return true when a scraper run's records are gone: they are kept 7 days after it ends. Always false for rows */
     public boolean expired() {
         return expired;
     }

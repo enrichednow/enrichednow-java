@@ -6,11 +6,11 @@
 
   <groupId>com.enrichednow</groupId>
   <artifactId>enrichednow-java</artifactId>
-  <version>0.3.1</version>
+  <version>0.4.0</version>
   <packaging>jar</packaging>
 
   <name>EnrichedNow Java SDK</name>
-  <description>The official Java client for the EnrichedNow API: run scrapers, read their records, and query the datasets.</description>
+  <description>The official Java client for the EnrichedNow API: run scrapers and read their records, run formulas for finished lists of rows, and query the datasets.</description>
   <url>https://enrichednow.com</url>
   <inceptionYear>2026</inceptionYear>
 

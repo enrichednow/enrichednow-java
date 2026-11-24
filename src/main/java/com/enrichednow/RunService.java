@@ -1,14 +1,11 @@
 package com.enrichednow;
 
 import com.enrichednow.errors.RunTimeoutException;
-import com.enrichednow.errors.EnrichedNowException;
 import com.enrichednow.models.RecordFormat;
 import com.enrichednow.models.RecordsExport;
 import com.enrichednow.models.Run;
 import com.fasterxml.jackson.databind.JavaType;
-import java.io.IOException;
 import java.io.OutputStream;
-import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Map;
 
@@ -70,38 +67,11 @@ public final class RunService {
      * @param runId  the run's id
      * @param format CSV or NDJSON
      * @param out    where to write
-     * @throws EnrichedNowException when the records are gone (kept 7 days after a run ends)
+     * @throws com.enrichednow.errors.EnrichedNowException when the records are gone (kept 7 days after a run ends)
      */
     public void exportAll(String runId, RecordFormat format, OutputStream out) {
-        String cursor = null;
-        boolean first = true;
-        try {
-            while (true) {
-                RecordsExport page = exportPage(runId, format, 1000, cursor);
-                if (page.expired()) {
-                    throw new EnrichedNowException("The records of run " + runId + " have expired: they are kept 7 days after a run ends.");
-                }
-                byte[] body = page.body();
-                int start = 0;
-                if (!first && format == RecordFormat.CSV) {
-                    start = body.length;
-                    for (int i = 0; i < body.length; i++) {
-                        if (body[i] == '\n') {
-                            start = i + 1;
-                            break;
-                        }
-                    }
-                }
-                out.write(body, start, body.length - start);
-                first = false;
-                if (page.nextCursor() == null) {
-                    return;
-                }
-                cursor = page.nextCursor();
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        Exports.writeAll(format, out, cursor -> exportPage(runId, format, 1000, cursor),
+                "The records of run " + runId + " have expired: they are kept 7 days after a run ends.");
     }
 
     /**

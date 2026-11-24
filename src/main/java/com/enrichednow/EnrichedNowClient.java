@@ -1,7 +1,10 @@
 package com.enrichednow;
 
 import com.enrichednow.errors.EnrichedNowException;
+import com.enrichednow.errors.FormulaRunFailedException;
 import com.enrichednow.errors.RunFailedException;
+import com.enrichednow.formulas.FormulaParams;
+import com.enrichednow.models.FormulaRun;
 import com.enrichednow.models.Health;
 import com.enrichednow.models.Run;
 import java.net.URI;
@@ -19,6 +22,11 @@ import java.util.function.Function;
  * ScrapeResult result = client.scrape("ats.board", Map.of("board_url", "https://boards.greenhouse.io/acme"));
  * for (Map<String, Object> job : result.records()) {
  *     System.out.println(job.get("title"));
+ * }
+ *
+ * FormulaResult rows = client.runFormula(JobOrderHunterParams.builder().jobTitles("Java Developer").locations("London").build());
+ * for (FormulaRow row : rows) {
+ *     System.out.println(row.get("company_name"));
  * }
  * }</pre>
  *
@@ -44,6 +52,12 @@ public final class EnrichedNowClient {
     private final UsageService usage;
     private final DataService data;
     private final WebhookService webhooks;
+    private final FormulaService formulas;
+    private final FormulaRunService formulaRuns;
+    private final SavedFormulaService savedFormulas;
+    private final SuppressionService suppressions;
+    private final AttestationService attestations;
+    private final FormulaRowService formulaRows;
     private final EnrichedNowAsyncClient async;
 
     private EnrichedNowClient(Builder builder) {
@@ -62,7 +76,13 @@ public final class EnrichedNowClient {
         this.usage = new UsageService(transport, requests);
         this.data = new DataService(transport, requests);
         this.webhooks = new WebhookService(transport, requests);
-        this.async = new EnrichedNowAsyncClient(transport, requests, runs);
+        this.formulas = new FormulaService(transport, requests);
+        this.formulaRuns = new FormulaRunService(transport, requests);
+        this.savedFormulas = new SavedFormulaService(transport, requests);
+        this.suppressions = new SuppressionService(transport, requests);
+        this.attestations = new AttestationService(transport, requests);
+        this.formulaRows = new FormulaRowService(transport, requests);
+        this.async = new EnrichedNowAsyncClient(transport, requests, runs, formulaRuns);
     }
 
     /**
@@ -103,6 +123,36 @@ public final class EnrichedNowClient {
     /** @return webhooks: the endpoints told when a run ends, their signing secrets, and the delivery log */
     public WebhookService webhooks() {
         return webhooks;
+    }
+
+    /** @return the catalogue of formulas, what a run would cost, and starting one */
+    public FormulaService formulas() {
+        return formulas;
+    }
+
+    /** @return formula runs and their rows */
+    public FormulaRunService formulaRuns() {
+        return formulaRuns;
+    }
+
+    /** @return saved formulas: a formula kept with its parameters, run by hand or on a schedule */
+    public SavedFormulaService savedFormulas() {
+        return savedFormulas;
+    }
+
+    /** @return the suppression list: what formula runs leave out */
+    public SuppressionService suppressions() {
+        return suppressions;
+    }
+
+    /** @return the terms some formulas need accepted */
+    public AttestationService attestations() {
+        return attestations;
+    }
+
+    /** @return saying what is right or wrong with a formula's row */
+    public FormulaRowService formulaRows() {
+        return formulaRows;
     }
 
     /**
@@ -166,6 +216,89 @@ public final class EnrichedNowClient {
         Run run = scrapers.run(scraperId, input, RunOptions.waitUpTo(firstWait(scrape)));
         run = runs.awaitEnd(run, deadline, scrape.pollInterval());
         return result(run, scrape, runs);
+    }
+
+    /**
+     * Runs a formula and waits for the result: starts a run, waits for it to end (up to 10 minutes), and returns the
+     * run with its rows.
+     *
+     * <pre>{@code
+     * FormulaResult result = client.runFormula(JobOrderHunterParams.builder()
+     *         .jobTitles("Java Developer").locations("London").build());
+     * for (FormulaRow row : result) { ... }
+     * }</pre>
+     *
+     * @param params the parameters of one formula; the formula is theirs
+     * @return the run, ended {@code ok} or {@code partial}, and its rows
+     * @throws FormulaRunFailedException                      when the run ended {@code failed}, {@code unsupported} or
+     *                                                        {@code cancelled}
+     * @throws com.enrichednow.errors.RunTimeoutException     when the run had not ended in time; it carries on
+     * @throws com.enrichednow.errors.ApiException            when the API refused the request
+     */
+    public FormulaResult runFormula(FormulaParams params) {
+        return runFormula(params, FormulaRunOptions.none());
+    }
+
+    /**
+     * Runs a formula and waits for the result.
+     *
+     * @param params  the parameters of one formula; the formula is theirs
+     * @param options a preview, the caps, the idempotency key; how long to wait, and whether a run that failed throws
+     * @return the run as it ended, and its rows
+     * @see #runFormula(String, Object, FormulaRunOptions)
+     */
+    public FormulaResult runFormula(FormulaParams params, FormulaRunOptions options) {
+        return runFormula(FormulaService.formulaOf(params), params, options);
+    }
+
+    /**
+     * Runs a formula and waits for the result, up to 10 minutes.
+     *
+     * @param formulaId the formula's id, e.g. {@code job-order-hunter}
+     * @param params    its parameters: a {@code Map}, a {@link FormulaParams} of that formula, or any object written as
+     *                  the JSON object its {@code parameters()} describe
+     * @return the run, ended {@code ok} or {@code partial}, and its rows
+     * @throws FormulaRunFailedException when the run ended {@code failed}, {@code unsupported} or {@code cancelled}
+     */
+    public FormulaResult runFormula(String formulaId, Object params) {
+        return runFormula(formulaId, params, FormulaRunOptions.none());
+    }
+
+    /**
+     * Runs a formula and waits for the result.
+     *
+     * <p>The run is started with the API holding the request open (up to 60 seconds, or the options' wait); a run that
+     * takes longer is then looked at until it ends or {@link FormulaRunOptions#timeout()} is up, each look again held
+     * open by the API. A run that ends {@code partial} is returned: it has rows, and its {@code reason()} says what is
+     * missing.
+     *
+     * @param formulaId the formula's id
+     * @param params    its parameters
+     * @param options   a preview, the caps, the idempotency key; how long to wait, and whether a run that failed throws
+     * @return the run as it ended, and its rows
+     * @throws IllegalArgumentException                   when {@code params} is a {@link FormulaParams} of another
+     *                                                    formula; nothing is sent
+     * @throws FormulaRunFailedException                  when the run ended {@code failed}, {@code unsupported} or
+     *                                                    {@code cancelled}, unless the options say not to throw
+     * @throws com.enrichednow.errors.RunTimeoutException when the run had not ended in time; it carries on
+     */
+    public FormulaResult runFormula(String formulaId, Object params, FormulaRunOptions options) {
+        FormulaRunOptions run = options == null ? FormulaRunOptions.none() : options;
+        long deadline = System.nanoTime() + run.timeout().toNanos();
+        FormulaRun started = formulas.run(formulaId, params, run.withWait(firstWait(run)));
+        return formulaResult(formulaRuns.awaitEnd(started.id(), started, deadline, run.pollInterval()), run, formulaRuns);
+    }
+
+    static Duration firstWait(FormulaRunOptions options) {
+        Duration wait = options.waitDuration() != null ? options.waitDuration() : RunOptions.SCRAPE_WAIT;
+        return options.timeout().compareTo(wait) < 0 ? options.timeout() : wait;
+    }
+
+    static FormulaResult formulaResult(FormulaRun run, FormulaRunOptions options, FormulaRunService formulaRuns) {
+        if (options.throwOnFailure() && !run.isSuccessful()) {
+            throw new FormulaRunFailedException(run);
+        }
+        return new FormulaResult(run, formulaRuns);
     }
 
     static Duration firstWait(ScrapeOptions options) {

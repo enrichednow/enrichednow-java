@@ -31,6 +31,14 @@ public final class RunOptions {
         }
     }
 
+    /** An idempotency key as the API takes it: 1 to 255 visible ASCII characters; null is no key. */
+    static String checkIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey != null && !idempotencyKey.matches("[\\x21-\\x7e]{1,255}")) {
+            throw new IllegalArgumentException("idempotencyKey must be 1 to 255 visible ASCII characters, without spaces");
+        }
+        return idempotencyKey;
+    }
+
     /** @return the defaults: the call returns as soon as the run is queued */
     public static RunOptions none() {
         return NONE;
@@ -104,10 +112,7 @@ public final class RunOptions {
          * @return this builder
          */
         public Builder idempotencyKey(String idempotencyKey) {
-            if (idempotencyKey != null && !idempotencyKey.matches("[\\x21-\\x7e]{1,255}")) {
-                throw new IllegalArgumentException("idempotencyKey must be 1 to 255 visible ASCII characters, without spaces");
-            }
-            this.idempotencyKey = idempotencyKey;
+            this.idempotencyKey = checkIdempotencyKey(idempotencyKey);
             return this;
         }
 

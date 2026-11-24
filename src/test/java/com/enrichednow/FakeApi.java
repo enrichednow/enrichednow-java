@@ -1,11 +1,19 @@
 package com.enrichednow;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -14,6 +22,7 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -105,7 +114,9 @@ final class FakeApi implements AutoCloseable {
             }
         }
         byte[] bytes = reply.body.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        if (reply.headers.keySet().stream().noneMatch(name -> name.equalsIgnoreCase("Content-Type"))) {
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+        }
         reply.headers.forEach((name, value) -> exchange.getResponseHeaders().add(name, value));
         try {
             exchange.sendResponseHeaders(reply.status, bytes.length == 0 ? -1 : bytes.length);
@@ -181,6 +192,130 @@ final class FakeApi implements AutoCloseable {
     public void close() {
         server.stop(0);
         executor.shutdownNow();
+    }
+
+    // --- recorded exchanges ------------------------------------------------------------------------------------------
+
+    /** Queues the answer of a recorded exchange of {@code fixtures/formulas}. */
+    FakeApi answer(String fixture) {
+        return reply(fixture(fixture).reply());
+    }
+
+    static Fixture fixture(String name) {
+        return new Fixture(name);
+    }
+
+    /**
+     * One exchange recorded from the real routes, under {@code src/test/resources/fixtures/formulas}: the request the
+     * SDK must send, and the API's answer.
+     */
+    static final class Fixture {
+        private static final ObjectMapper MAPPER = new ObjectMapper();
+
+        final String name;
+        final JsonNode request;
+        final JsonNode response;
+
+        private Fixture(String name) {
+            this.name = name;
+            try (InputStream in = FakeApi.class.getResourceAsStream("/fixtures/formulas/" + name + ".json")) {
+                if (in == null) {
+                    throw new IllegalArgumentException("no fixture " + name);
+                }
+                JsonNode root = MAPPER.readTree(in);
+                this.request = root.path("request");
+                this.response = root.path("response");
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+
+        /** @return the answer, as the API gave it: its status, headers and body */
+        Reply reply() {
+            String body = "";
+            if (response.has("body")) {
+                try {
+                    body = MAPPER.writeValueAsString(response.get("body"));
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            } else if (response.has("text")) {
+                body = response.get("text").asText();
+            }
+            Reply reply = new Reply(response.path("status").asInt(), body);
+            response.path("headers").fields().forEachRemaining(header -> reply.header(header.getKey(), header.getValue().asText()));
+            return reply;
+        }
+
+        /** @return the answer's JSON body */
+        JsonNode body() {
+            return response.path("body");
+        }
+
+        /** @return the answer's text body (CSV or NDJSON) */
+        String text() {
+            return response.path("text").asText();
+        }
+
+        /** @return the request's query, decoded */
+        Map<String, String> query() {
+            Map<String, String> query = new TreeMap<>();
+            request.path("query").fields().forEachRemaining(field -> query.put(field.getKey(), field.getValue().asText()));
+            return query;
+        }
+
+        /** @return the answer with its JSON body changed by {@code change} */
+        Reply replyWith(java.util.function.Consumer<ObjectNode> change) {
+            ObjectNode copy = response.path("body").deepCopy();
+            change.accept(copy);
+            Reply original = reply();
+            Reply reply;
+            try {
+                reply = new Reply(original.status, MAPPER.writeValueAsString(copy));
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            reply.headers.putAll(original.headers);
+            return reply;
+        }
+
+        /** Asserts the SDK sent the recorded request: its method, path, query, body and the headers it names. */
+        void assertSent(Received received) {
+            assertSent(received, query());
+        }
+
+        /** Asserts the SDK sent the recorded request, with this query instead of the recorded one. */
+        void assertSent(Received received, Map<String, String> expectedQuery) {
+            assertEquals(request.path("method").asText(), received.method, name + ": method");
+            assertEquals(request.path("path").asText(), received.path, name + ": path");
+            assertEquals(new TreeMap<>(expectedQuery), queryOf(received), name + ": query");
+            if (request.has("body")) {
+                try {
+                    assertEquals(request.get("body"), MAPPER.readTree(received.body), name + ": body");
+                } catch (IOException e) {
+                    throw new AssertionError(name + ": the body sent is not JSON: " + received.body, e);
+                }
+                assertEquals("application/json", received.header("Content-Type"), name + ": content type");
+            } else if (request.has("text")) {
+                assertEquals(request.get("text").asText(), received.body, name + ": body");
+            } else {
+                assertEquals("", received.body, name + ": no body");
+            }
+            request.path("headers").fields().forEachRemaining(header ->
+                    assertEquals(header.getValue().asText(), received.header(header.getKey()), name + ": header " + header.getKey()));
+        }
+
+        static Map<String, String> queryOf(Received received) {
+            Map<String, String> query = new TreeMap<>();
+            if (received.query != null && !received.query.isEmpty()) {
+                for (String pair : received.query.split("&")) {
+                    int equals = pair.indexOf('=');
+                    query.put(URLDecoder.decode(pair.substring(0, equals), StandardCharsets.UTF_8),
+                            URLDecoder.decode(pair.substring(equals + 1), StandardCharsets.UTF_8));
+                }
+            }
+            return query;
+        }
     }
 
     // --- bodies -------------------------------------------------------------------------------------------------------

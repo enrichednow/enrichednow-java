@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/enrichednow/enrichednow-java/actions/workflows/ci.yml/badge.svg)](https://github.com/enrichednow/enrichednow-java/actions/workflows/ci.yml)
 
-The official Java client for the [EnrichedNow API](https://docs.enrichednow.com): run scrapers, read their records, and
-query the datasets.
+The official Java client for the [EnrichedNow API](https://docs.enrichednow.com): run scrapers and read their records,
+run formulas for finished lists of rows, and query the datasets.
 
 - Java 11 or later. One dependency: Jackson (`jackson-databind`).
 - Blocking calls, with a `CompletableFuture` variant of each under `client.async()`.
@@ -17,20 +17,20 @@ Maven:
 <dependency>
   <groupId>com.enrichednow</groupId>
   <artifactId>enrichednow-java</artifactId>
-  <version>0.3.1</version>
+  <version>0.4.0</version>
 </dependency>
 ```
 
 Gradle (Kotlin DSL):
 
 ```kotlin
-implementation("com.enrichednow:enrichednow-java:0.3.1")
+implementation("com.enrichednow:enrichednow-java:0.4.0")
 ```
 
 Gradle (Groovy DSL):
 
 ```groovy
-implementation 'com.enrichednow:enrichednow-java:0.3.1'
+implementation 'com.enrichednow:enrichednow-java:0.4.0'
 ```
 
 ## Quickstart
@@ -242,6 +242,10 @@ A cursor is an opaque string. To pick a list up later, keep `page.nextCursor()` 
 | `runs().list` | 1 to 100, default 20 |
 | `runs().records` | 1 to 1000, default 100 |
 | `data().postings().list`, `data().companies().list`, `data().companies().postings` | 1 to 200, default 50 |
+| `formulaRuns().list` | 1 to 100, default 20 |
+| `formulaRuns().rows`, `savedFormulas().rows` | 1 to 1000, default 100 (`runFormula`'s result: 1000) |
+| `savedFormulas().list` | 1 to 100, default 50 |
+| `suppressions().list` | 1 to 1000, default 100 |
 
 ## Usage
 
@@ -330,6 +334,174 @@ client.data().companies().postings("acme.com", PostingListParams.builder().statu
 `employmentType`, `seniority`, `function`, `status`, `source`, `provenance`, `unmatched`, `postedFrom`/`postedTo`,
 `firstSeenFrom`/`firstSeenTo`, `lastSeenFrom`/`lastSeenTo`, `sort`, `limit` and `cursor`.
 
+## Formulas
+
+A formula is a ready-made run: give it a few parameters and it returns a finished list of rows, each with a score and
+where its values came from. The catalogue is free to read; a run spends units, never more than its unit cap.
+
+```java
+for (Formula formula : client.formulas().list()) {                 // GET /v1/formulas
+    System.out.println(formula.id() + ": " + formula.summary());
+}
+FormulaDetails hunter = client.formulas().get("job-order-hunter"); // parameters, presets, columns, sample rows
+hunter.parameters();                                               // JSON Schema of the parameters, as a Map
+hunter.columns();                                                  // the columns of a row
+```
+
+### Run one and read its rows
+
+Each formula has a parameter class in `com.enrichednow.formulas`, with a builder that refuses to build without the
+required parameters. A `Map` works too, for any formula.
+
+```java
+JobOrderHunterParams params = JobOrderHunterParams.builder()
+        .jobTitles("Java Developer", "DevOps Engineer")
+        .locations("London")
+        .postedWithinDays(2)
+        .build();
+
+FormulaResult result = client.runFormula(params);                  // starts it, waits for it to end
+System.out.println(result.run().status() + ": " + result.run().rowsTotal() + " rows, " + result.run().unitsSpent() + " units");
+for (FormulaRow row : result) {                                     // every row, best first; pages are fetched as you go
+    System.out.println(row.get("company_name") + " " + row.get("contact_email") + " " + row.score());
+}
+
+// The same with a Map, for any formula.
+client.runFormula("job-order-hunter", Map.of("job_titles", List.of("Java Developer"), "locations", List.of("London")));
+```
+
+`runFormula` throws a `FormulaRunFailedException` when the run ended `failed`, `unsupported` or `cancelled`. A run that
+ended `partial` is returned: it has rows, and `run().reason()` says what is missing (`unit_cap_reached`,
+`contacts_not_connected`, ...). Typed parameters of one formula given with another's id are refused before anything is
+sent.
+
+```java
+FormulaResult result = client.runFormula(params, FormulaRunOptions.builder()
+        .unitCap(2000)                          // the most it may spend; it stops there and ends partial
+        .rowCap(100)                            // the most rows
+        .timeout(Duration.ofMinutes(15))        // give up waiting after this; default 10 minutes
+        .throwOnFailure(false)                  // return the result whatever status the run ended with
+        .build());
+
+result.rows(FormulaRowListParams.builder()
+        .fields("company_name", "job_title", "contact_email")      // only these columns
+        .minScore(10)                                              // rows scored at least 10
+        .view(FormulaRowListParams.View.COMPANY)                   // one row per company, where the formula has that view
+        .build());
+
+try (OutputStream out = Files.newOutputStream(Path.of("job-orders.csv"))) {
+    result.exportAll(RecordFormat.CSV, out);                        // one file, the header row once; or NDJSON
+}
+```
+
+### Estimate first, or preview
+
+```java
+FormulaEstimate cost = client.formulas().estimate(params);           // spends nothing
+if (cost.valid()) {
+    System.out.println("about " + cost.estimate().expectedUnits() + ", at most " + cost.estimate().maxUnits() + " units");
+} else {
+    cost.errors().forEach(p -> System.err.println(p.path() + ": " + p.message()));   // not an exception
+}
+
+FormulaResult preview = client.runFormula(params, FormulaRunOptions.preview());  // at most 10 rows and 50 units
+```
+
+### Runs, one call at a time
+
+```java
+FormulaRun run = client.formulas().run(params);                      // POST /v1/formulas/{id}/runs; returns when queued
+FormulaRun run = client.formulas().run(params, FormulaRunOptions.builder()
+        .wait(Duration.ofSeconds(60)).idempotencyKey("job-orders-2026-11-25").build());
+FormulaRun ended = client.formulaRuns().waitFor(run.id());           // each look held open by the API, up to 10 minutes
+client.formulaRuns().get(run.id());                                  // with what each step did: run.steps()
+client.formulaRuns().rows(run.id());                                 // rows can be read while it runs
+client.formulaRuns().exportAll(run.id(), RecordFormat.NDJSON, out);
+client.formulaRuns().cancel(run.id());
+for (FormulaRun each : client.formulaRuns().list(FormulaRunListParams.builder().formulaId("job-order-hunter").build())) { ... }
+```
+
+Starting a run carries an `Idempotency-Key` and is retried like a scraper run. Rows are kept 90 days.
+
+### Saved formulas
+
+A saved formula keeps its parameters and caps, runs on a schedule, and delivers only rows it has not delivered before:
+poll its rows with `since` for what is new.
+
+```java
+SavedFormula saved = client.savedFormulas().create(SavedFormulaCreate.builder(params)
+        .schedule(Schedule.weekdays("07:30", "Europe/London"))  // or hourly, daily, weekly(DayOfWeek, ...), monthly(day, ...)
+        .monthlyUnitCap(20000)
+        .notify(Notify.DIGEST)                                  // mail about new rows: EACH_RUN, DIGEST or NONE
+        .build());
+
+Instant lastPoll = Instant.parse("2026-11-24T07:30:00Z");
+for (FormulaRow row : client.savedFormulas().rows(saved.id(), FormulaRowListParams.builder().since(lastPoll).build())) {
+    System.out.println(row.get("company_name"));
+}
+
+client.savedFormulas().run(saved.id());                       // now, by hand; SavedFormulaRunOptions for preview, includeSeen
+client.savedFormulas().update(saved.id(), SavedFormulaChange.builder()
+        .name("Java in London")
+        .removeMonthlyUnitCap()                                 // also removeSchedule(), autoName()
+        .build());
+client.savedFormulas().pause(saved.id());
+client.savedFormulas().resume(saved.id());
+client.savedFormulas().duplicate(saved.id(), DuplicateOptions.builder().copySeen(true).build());
+client.savedFormulas().resetSeen(saved.id());                 // its next run may deliver the same rows again
+client.savedFormulas().archive(saved.id());
+client.savedFormulas().limits();                              // what the plan allows: schedules, shortest interval
+```
+
+### The suppression list
+
+Domains, addresses and company names that formula runs leave out.
+
+```java
+client.suppressions().add(SuppressionEntry.domain("client-one.example"), SuppressionEntry.email("jo@client-two.example"));
+SuppressionUpload upload = client.suppressions().upload(Path.of("do-not-contact.csv"));   // or bytes, text, a stream
+System.out.println(upload.added() + " added, " + upload.already() + " already there, " + upload.invalid().size() + " unreadable");
+for (Suppression entry : client.suppressions().list()) { ... }
+client.suppressions().delete(SuppressionKind.DOMAIN, "client-one.example");
+```
+
+A CSV file with a header row of `kind` and `value` says the kind of each line; otherwise each value is read as an address,
+a domain or a company name by how it looks, or as the kind given: `upload(file, SuppressionKind.DOMAIN)`.
+
+### Row feedback and the terms
+
+```java
+client.formulaRows().feedback(row.id(), RowVerdict.WRONG_COMPANY, "The agency, not the employer.", "acme.example");
+client.attestations().list();     // the terms a formula that returns people needs, and whether they are accepted
+```
+
+A formula whose `needsAttestation()` is true runs once an owner or an admin of the account has accepted the terms, in
+the console; an API key cannot accept them.
+
+### When a formula cannot run
+
+```java
+try {
+    client.runFormula(params);
+} catch (AttestationRequiredException e) {        // 409: the terms are not accepted yet
+    System.err.println("Accept the " + e.kind() + " terms in the console first.");
+} catch (RequirementMissingException e) {         // 409: e.g. [product:data]
+    System.err.println("The account lacks " + e.missing());
+} catch (FormulaUnavailableException e) {         // 409: deprecated, or not offered now
+    System.err.println(e.formulaStatus());
+} catch (ValidationException e) {                 // 422: the parameters, or unit_cap_too_low
+    System.err.println(e.code() + " " + e.fieldErrors() + " " + e.minUnitCap());
+} catch (LimitReachedException e) {               // 402: a spend limit, e.g. a saved formula's monthly cap
+    System.err.println(e.scope() + " " + e.limitUnits());
+} catch (FormulaRunFailedException e) {           // the request worked, the run did not
+    System.err.println(e.status() + " / " + e.reason());
+}
+```
+
+`PlanLimitReachedException` (403) comes from saving, changing, duplicating or resuming a saved formula with a schedule
+the plan does not allow, and
+`SavedFormulaArchivedException` (409) from changing or running an archived saved formula.
+
 ## Service health
 
 ```java
@@ -342,19 +514,26 @@ Everything the SDK throws is unchecked and extends `EnrichedNowException`.
 
 | Exception | When |
 | --- | --- |
-| `ApiException` | The API answered with an error. The base of the next seven. |
+| `ApiException` | The API answered with an error. The base of the next eight. |
 | `AuthenticationException` | `401 unauthorized`: the key is missing, mistyped or revoked. |
 | `QuotaExceededException` | `402 quota_exceeded`: this month's allowance is used up. `usedUnits()`, `allowanceUnits()`. |
-| `LimitReachedException` | `402 limit_reached`: a spend limit of the account's own, or of the key. `scope()` (`account` or `key`), `keyId()`, `limitUnits()`, `usedUnits()`, `unitsNeeded()`. Extends `QuotaExceededException`. |
+| `LimitReachedException` | `402 limit_reached`: a spend limit set on the account, not the plan's allowance. `scope()` (`account`, `key`, `saved_formula` or `formula_run`), `keyId()`, `savedFormulaId()`, `limitUnits()`, `usedUnits()`, `unitsNeeded()`. Extends `QuotaExceededException`. |
 | `PermissionDeniedException` | `403 forbidden`: for example, the account does not have Datasets. |
-| `NotFoundException` | `404 not_found`: no such scraper, run, posting or company. |
-| `ValidationException` | `422 invalid_input`: the request does not fit. `fieldErrors()` lists every problem. |
+| `PlanLimitReachedException` | `403 plan_limit_reached`: the plan does not allow this many schedules, a cadence this short, or this many destinations. `limit()`, `allowed()`, `current()`, `asked()`. Extends `PermissionDeniedException`. |
+| `NotFoundException` | `404 not_found` or `formula_not_found`: no such scraper, run, posting, company or formula. |
+| `ConflictException` | `409`: `idempotency_conflict`, and the base of the four below. |
+| `AttestationRequiredException` | `409 attestation_required`: the formula returns people and the terms are not accepted yet. `kind()`, `textVersion()`. |
+| `FormulaUnavailableException` | `409 formula_unavailable`: the formula cannot be run now. `formulaStatus()`, or `formulaId()` and `major()` for a saved formula's version. |
+| `RequirementMissingException` | `409 requirement_missing`: the account lacks what the formula needs. `missing()`, e.g. `product:data`. |
+| `SavedFormulaArchivedException` | `409 saved_formula_archived`: duplicate it to use it again. `savedFormulaId()`. |
+| `ValidationException` | `422 invalid_input`: the request does not fit. `fieldErrors()` lists every problem. `422 unit_cap_too_low`: `minUnitCap()`. |
 | `RateLimitException` | `429`: `too_many_runs` (`isTooManyRuns()`, `activeRuns()`, `maxConcurrentRuns()`) or `rate_limited` (`retryAfter()`). |
 | `ServerException` | `5xx`: `internal`, or `data_unavailable` for Datasets. |
 | `ConnectionException` | No answer arrived. |
 | `ApiTimeoutException` | The request took longer than the timeout. A `ConnectionException`. |
 | `RunFailedException` | `scrape`: the run ended `failed`, `unsupported` or `cancelled`. `status()`, `reason()`, `run()`. |
-| `RunTimeoutException` | `scrape` / `waitFor`: the run had not ended in time. `runId()`, `run()`. |
+| `FormulaRunFailedException` | `runFormula`: the formula run ended `failed`, `unsupported` or `cancelled`. `formulaRun()`, `status()`, `reason()`. Extends `RunFailedException`. |
+| `RunTimeoutException` | `scrape` / `runFormula` / `waitFor`: the run had not ended in time. `runId()`, `run()` or `formulaRun()`. |
 
 ```java
 try {
@@ -399,7 +578,11 @@ Run run = client.scrapers().run("ats.board", input,
 ```
 
 For 24 hours the same key with the same request gives the same run. The same key with a different request is refused:
-an `ApiException` with status 409 and code `idempotency_conflict`.
+a `ConflictException` (an `ApiException` with status 409) with code `idempotency_conflict`.
+
+Formula runs work the same way (`FormulaRunOptions` and `SavedFormulaRunOptions` take an `idempotencyKey`). Saving a
+formula and duplicating one are not sent again after a failure that may have reached the API; changing, pausing,
+resuming, the suppression list and row feedback are safe to repeat and are retried as reads are.
 
 ## Async
 
@@ -415,6 +598,9 @@ CompletableFuture<Run> ended = client.async().runs().waitFor("run_id");
 
 client.async().data().postings().listPage(PostingListParams.none())
         .thenCompose(Page::nextPageAsync);                     // lists come a page at a time
+
+client.async().runFormula(params).thenAccept(result -> System.out.println(result.run().rowsTotal()));
+client.async().formulaRuns().rowsPage(runId, FormulaRowListParams.limit(1000));
 ```
 
 A call that fails completes its future with the exception the blocking call would have thrown (`join()` wraps it in
